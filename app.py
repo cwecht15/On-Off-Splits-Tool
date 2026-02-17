@@ -497,12 +497,14 @@ def top_player_diffs(
     part_wide: pd.DataFrame,
     rosters: pd.DataFrame,
     role: str,
-    margin_range: tuple[int, int],
     min_plays: int,
+    leaderboard_team: str | None = None,
     top_n: int = 50,
 ) -> pd.DataFrame:
     team_col = "offense" if role == "offense" else "defense"
-    team_plays = apply_margin_filter(plays, role, margin_range).copy()
+    team_plays = plays.copy()
+    if leaderboard_team:
+        team_plays = team_plays[team_plays[team_col] == leaderboard_team]
     if team_plays.empty:
         return pd.DataFrame()
 
@@ -773,6 +775,9 @@ if selected_weeks:
     part_filtered = part_filtered[part_filtered["display_week"].isin(selected_weeks)]
     roster_filtered = roster_filtered[roster_filtered["display_week"].isin(selected_weeks)]
 
+# Leaderboards intentionally use only season/week filters.
+leaderboard_plays = base_filtered.copy()
+
 team_options = sorted([str(x) for x in roster_filtered["team"].dropna().unique() if str(x)])
 if not team_options:
     team_options = sorted(set(base_filtered["offense"].astype(str).unique()) | set(base_filtered["defense"].astype(str).unique()))
@@ -859,6 +864,11 @@ score_margin_range = st.sidebar.slider("Score margin (team perspective)", min_va
 min_play_threshold = st.sidebar.number_input("Minimum plays (On and Off)", min_value=0, value=0, step=10)
 on_mode = st.sidebar.radio("On definition", ["Any selected player on field", "All selected players on field"], index=0)
 leaderboard_min_plays = st.sidebar.number_input("Leaderboard min plays (On and Off)", min_value=1, value=100, step=10)
+leaderboard_team_options = sorted(
+    set(leaderboard_plays["offense"].dropna().astype(str).unique()) | set(leaderboard_plays["defense"].dropna().astype(str).unique())
+)
+leaderboard_team_choice = st.sidebar.selectbox("Leaderboard team", ["All teams"] + leaderboard_team_options)
+leaderboard_team_filter = None if leaderboard_team_choice == "All teams" else leaderboard_team_choice
 
 base_filtered = apply_common_filters(
     base_filtered,
@@ -915,21 +925,21 @@ defense_baseline = baseline_table(base_filtered, team=team, role="defense", marg
 offense_trend = trend_table(base_filtered, part_filtered, team, selected_player_ids, "offense", on_mode, score_margin_range)
 defense_trend = trend_table(base_filtered, part_filtered, team, selected_player_ids, "defense", on_mode, score_margin_range)
 top_offense = top_player_diffs(
-    plays=base_filtered,
+    plays=leaderboard_plays,
     part_wide=part_filtered,
     rosters=roster_filtered,
     role="offense",
-    margin_range=score_margin_range,
     min_plays=int(leaderboard_min_plays),
+    leaderboard_team=leaderboard_team_filter,
     top_n=50,
 )
 top_defense = top_player_diffs(
-    plays=base_filtered,
+    plays=leaderboard_plays,
     part_wide=part_filtered,
     rosters=roster_filtered,
     role="defense",
-    margin_range=score_margin_range,
     min_plays=int(leaderboard_min_plays),
+    leaderboard_team=leaderboard_team_filter,
     top_n=50,
 )
 
