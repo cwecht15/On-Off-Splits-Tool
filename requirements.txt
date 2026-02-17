@@ -3,3 +3,4 @@ numpy
 streamlit
 fpdf2
 matplotlib
+altair<5
