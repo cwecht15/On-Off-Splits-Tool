@@ -792,20 +792,20 @@ with col1:
     if offense_table.empty:
         st.info("No offense rows for this selection.")
     else:
-        st.dataframe(offense_table.style.format(formatters), use_container_width=True)
+        st.dataframe(offense_table.style.format(formatters), width="stretch")
 
     st.markdown("### Offense Baseline (Team vs League)")
-    st.dataframe(offense_baseline.style.format(formatters), use_container_width=True)
+    st.dataframe(offense_baseline.style.format(formatters), width="stretch")
 
 with col2:
     st.markdown("### Defense On/Off")
     if defense_table.empty:
         st.info("No defense rows for this selection.")
     else:
-        st.dataframe(defense_table.style.format(formatters), use_container_width=True)
+        st.dataframe(defense_table.style.format(formatters), width="stretch")
 
     st.markdown("### Defense Baseline (Team vs League)")
-    st.dataframe(defense_baseline.style.format(formatters), use_container_width=True)
+    st.dataframe(defense_baseline.style.format(formatters), width="stretch")
 
 st.markdown("### Offense Trend (EPA/play)")
 if offense_trend.empty:
@@ -817,7 +817,7 @@ else:
         st.line_chart(offense_plot[offense_cols])
     else:
         st.info("No offense On/Off EPA series available for current filters.")
-    st.dataframe(offense_trend, use_container_width=True)
+    st.dataframe(offense_trend, width="stretch")
 
 st.markdown("### Defense Trend (EPA/play)")
 if defense_trend.empty:
@@ -829,19 +829,19 @@ else:
         st.line_chart(defense_plot[defense_cols])
     else:
         st.info("No defense On/Off EPA series available for current filters.")
-    st.dataframe(defense_trend, use_container_width=True)
+    st.dataframe(defense_trend, width="stretch")
 
 st.markdown("### Offense Personnel Splits")
 if offense_personnel.empty:
     st.info("No offense personnel rows.")
 else:
-    st.dataframe(offense_personnel.style.format(formatters), use_container_width=True)
+    st.dataframe(offense_personnel.style.format(formatters), width="stretch")
 
 st.markdown("### Defense Personnel Splits (Opponent Offensive Personnel)")
 if defense_personnel.empty:
     st.info("No defense personnel rows.")
 else:
-    st.dataframe(defense_personnel.style.format(formatters), use_container_width=True)
+    st.dataframe(defense_personnel.style.format(formatters), width="stretch")
 
 st.markdown("### Export")
 export_col1, export_col2 = st.columns(2)
@@ -898,3 +898,4 @@ with export_col2:
 
 with st.expander("Selection", expanded=False):
     st.write(selection_payload)
+
