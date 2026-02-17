@@ -851,6 +851,7 @@ if not selected_labels:
 selected_player_ids = (
     player_options[player_options["label"].isin(selected_labels)]["player_id"].drop_duplicates().tolist()
 )
+on_mode = st.sidebar.radio("On definition", ["Any selected player on field", "All selected players on field"], index=0)
 
 team_scope = base_filtered[(base_filtered["offense"] == team) | (base_filtered["defense"] == team)]
 if team_scope.empty:
@@ -884,7 +885,6 @@ margin_max = int(np.ceil(np.nanmax(team_margin_series)))
 score_margin_range = st.sidebar.slider("Score margin (team perspective)", min_value=margin_min, max_value=margin_max, value=(margin_min, margin_max))
 
 min_play_threshold = st.sidebar.number_input("Minimum plays (On and Off)", min_value=0, value=0, step=10)
-on_mode = st.sidebar.radio("On definition", ["Any selected player on field", "All selected players on field"], index=0)
 leaderboard_min_plays = st.sidebar.number_input("Leaderboard min plays (On and Off)", min_value=1, value=100, step=10)
 leaderboard_team_options = sorted(
     set(leaderboard_plays["offense"].dropna().astype(str).unique()) | set(leaderboard_plays["defense"].dropna().astype(str).unique())
