@@ -474,9 +474,9 @@ def trend_table(
     return out
 
 
-def build_player_name_lookup(rosters: pd.DataFrame) -> pd.DataFrame:
+def build_player_lookup(rosters: pd.DataFrame) -> pd.DataFrame:
     if rosters.empty:
-        return pd.DataFrame(columns=["player_id", "player_name"])
+        return pd.DataFrame(columns=["player_id", "player_name", "position"])
 
     preferred_first = normalize_str(rosters["FootballName"])
     fallback_first = normalize_str(rosters["FirstName"])
@@ -485,7 +485,13 @@ def build_player_name_lookup(rosters: pd.DataFrame) -> pd.DataFrame:
     full_name = (first_name + " " + last_name).str.strip()
     full_name = full_name.where(full_name.str.len() > 0, first_name)
 
-    lookup = pd.DataFrame({"player_id": normalize_str(rosters["player_id"]), "player_name": full_name})
+    lookup = pd.DataFrame(
+        {
+            "player_id": normalize_str(rosters["player_id"]),
+            "player_name": full_name,
+            "position": normalize_str(rosters["position"].astype("string")),
+        }
+    )
     lookup = lookup[lookup["player_id"].str.len() > 0]
     lookup = lookup[lookup["player_name"].str.len() > 0]
     lookup = lookup.drop_duplicates(subset=["player_id"], keep="first")
@@ -499,6 +505,7 @@ def top_player_diffs(
     role: str,
     min_plays: int,
     leaderboard_team: str | None = None,
+    leaderboard_position: str | None = None,
     top_n: int = 50,
 ) -> pd.DataFrame:
     team_col = "offense" if role == "offense" else "defense"
@@ -578,9 +585,14 @@ def top_player_diffs(
     out["success_delta"] = out["on_success_rate"] - out["off_success_rate"]
     out["abs_epa_delta"] = out["epa_delta"].abs()
 
-    player_lookup = build_player_name_lookup(rosters)
+    player_lookup = build_player_lookup(rosters)
     out = out.merge(player_lookup, on="player_id", how="left")
     out["player_name"] = out["player_name"].fillna("Unknown")
+    out["position"] = out["position"].fillna("")
+    if leaderboard_position:
+        out = out[out["position"] == leaderboard_position]
+        if out.empty:
+            return pd.DataFrame()
     out["Player"] = out["player_name"] + " (" + out["player_id"] + ")"
 
     out = out.sort_values(["abs_epa_delta", "on_plays"], ascending=[False, False]).head(top_n).copy()
@@ -588,6 +600,7 @@ def top_player_diffs(
         [
             "Player",
             "team",
+            "position",
             "on_plays",
             "off_plays",
             "on_epa_play",
@@ -604,6 +617,7 @@ def top_player_diffs(
     ].rename(
         columns={
             "team": "Team",
+            "position": "Pos",
             "on_plays": "On Plays",
             "off_plays": "Off Plays",
             "on_epa_play": "On EPA/play",
@@ -869,6 +883,9 @@ leaderboard_team_options = sorted(
 )
 leaderboard_team_choice = st.sidebar.selectbox("Leaderboard team", ["All teams"] + leaderboard_team_options)
 leaderboard_team_filter = None if leaderboard_team_choice == "All teams" else leaderboard_team_choice
+leaderboard_position_options = sorted([p for p in roster_filtered["position"].dropna().astype(str).str.strip().unique() if p])
+leaderboard_position_choice = st.sidebar.selectbox("Leaderboard position", ["All positions"] + leaderboard_position_options)
+leaderboard_position_filter = None if leaderboard_position_choice == "All positions" else leaderboard_position_choice
 
 base_filtered = apply_common_filters(
     base_filtered,
@@ -931,6 +948,7 @@ top_offense = top_player_diffs(
     role="offense",
     min_plays=int(leaderboard_min_plays),
     leaderboard_team=leaderboard_team_filter,
+    leaderboard_position=leaderboard_position_filter,
     top_n=50,
 )
 top_defense = top_player_diffs(
@@ -940,6 +958,7 @@ top_defense = top_player_diffs(
     role="defense",
     min_plays=int(leaderboard_min_plays),
     leaderboard_team=leaderboard_team_filter,
+    leaderboard_position=leaderboard_position_filter,
     top_n=50,
 )
 
