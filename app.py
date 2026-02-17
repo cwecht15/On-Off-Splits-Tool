@@ -27,6 +27,18 @@ def normalize_str(series: pd.Series) -> pd.Series:
     return series.fillna("").astype(str).str.strip()
 
 
+def normalize_position(series: pd.Series) -> pd.Series:
+    pos = normalize_str(series).str.upper()
+    pos = pos.replace(
+        {
+            "KICKER": "K",
+            "PK": "K",
+            "PUNTER": "P",
+        }
+    )
+    return pos
+
+
 def map_display_week(week: pd.Series, season_type: pd.Series) -> pd.Series:
     return week + np.where(season_type == "POST", 18, 0)
 
@@ -217,6 +229,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     rosters["seasonType"] = normalize_str(rosters["seasonType"]).str.upper()
     rosters["team"] = normalize_team(rosters["team"])
     rosters["player_id"] = normalize_str(rosters["player_id"])
+    rosters["position"] = normalize_position(rosters["position"])
     rosters["display_week"] = map_display_week(rosters["week"], rosters["seasonType"])
 
     for col in ["seasonType", "offense", "defense"]:
@@ -489,7 +502,7 @@ def build_player_lookup(rosters: pd.DataFrame) -> pd.DataFrame:
         {
             "player_id": normalize_str(rosters["player_id"]),
             "player_name": full_name,
-            "position": normalize_str(rosters["position"].astype("string")),
+            "position": normalize_position(rosters["position"].astype("string")),
         }
     )
     lookup = lookup[lookup["player_id"].str.len() > 0]
@@ -819,7 +832,7 @@ player_options = (
         {
             "player_id": normalize_str(player_df["player_id"]),
             "name": name,
-            "position": normalize_str(player_df["position"].astype("string")),
+            "position": normalize_position(player_df["position"].astype("string")),
         }
     )
     .dropna(subset=["player_id"])
@@ -883,7 +896,7 @@ leaderboard_team_options = sorted(
 )
 leaderboard_team_choice = st.sidebar.selectbox("Leaderboard team", ["All teams"] + leaderboard_team_options)
 leaderboard_team_filter = None if leaderboard_team_choice == "All teams" else leaderboard_team_choice
-leaderboard_position_options = sorted([p for p in roster_filtered["position"].dropna().astype(str).str.strip().unique() if p])
+leaderboard_position_options = sorted([p for p in normalize_position(roster_filtered["position"]).dropna().astype(str).str.strip().unique() if p])
 leaderboard_position_filter = st.sidebar.multiselect(
     "Leaderboard positions",
     leaderboard_position_options,
