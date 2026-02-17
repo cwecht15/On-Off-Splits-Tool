@@ -1,13 +1,8 @@
 # NFL On/Off Splits Tool
 
-Internal Streamlit app for NFL player on/off splits using:
-- `participation.csv`
-- `play_by_play_data.csv`
-- `epa.csv`
-- `weekly_rosters.csv`
-- `pp_data.csv`
+Internal Streamlit dashboard for NFL player on/off splits with offense and defense views, trend charts, personnel splits, and export.
 
-## Run Locally
+## Quick Start
 
 ```powershell
 python -m venv .venv
@@ -16,44 +11,17 @@ python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
-## Deploy To Streamlit Community Cloud (Option A)
+## Documentation
 
-### 1) Create a GitHub repo and push this project
+- Product and workflow: `docs/USER_GUIDE.md`
+- Metrics, filters, and data logic: `docs/METRICS_AND_DATA_LOGIC.md`
+- Streamlit Cloud deployment + troubleshooting: `docs/DEPLOYMENT_STREAMLIT_CLOUD.md`
+- Test coverage and commands: `docs/TESTING.md`
 
-Because your CSV files are large, use Git LFS.
+## Core Files
 
-```powershell
-git init
-git lfs install
-git lfs track "*.csv"
-git add .gitattributes
-git add .
-git commit -m "Initial NFL on/off app"
-git branch -M main
-git remote add origin https://github.com/<your-org-or-user>/<repo-name>.git
-git push -u origin main
-```
-
-Notes:
-- GitHub rejects files over 100 MB without LFS.
-- Keep the repo private if data is sensitive.
-
-### 2) Deploy on Streamlit
-
-1. Go to `https://share.streamlit.io`
-2. Click `Create app`
-3. Select your GitHub repo + branch `main`
-4. Set main file path to `app.py`
-5. Click `Deploy`
-
-### 3) Share with your team
-
-- Use app sharing controls in Streamlit to grant access.
-- Share the generated app URL.
-
-## Tests
-
-```powershell
-python -m unittest tests\test_data_correctness.py tests\test_golden_regression.py tests\test_golden_regression_defense.py -v
-```
-
+- App: `app.py`
+- Requirements: `requirements.txt`
+- Streamlit config: `.streamlit/config.toml`
+- Runtime pin: `runtime.txt`
+- Tests: `tests/test_data_correctness.py`, `tests/test_golden_regression.py`, `tests/test_golden_regression_defense.py`
