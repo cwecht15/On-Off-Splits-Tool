@@ -563,28 +563,47 @@ def top_player_diffs(
     if role_part.empty:
         return pd.DataFrame()
 
-    presence = role_part.melt(
-        id_vars=["gameId", "playId", "team", "epa", "success_flag", "pass_flag", "run_flag", "pass_epa", "run_epa"],
-        value_vars=player_cols,
-        value_name="player_id",
-    )
-    presence = presence.drop(columns=["variable"]).dropna(subset=["player_id"])
-    presence["player_id"] = normalize_str(presence["player_id"].astype("string"))
-    presence = presence[presence["player_id"].str.len() > 0]
-    presence = presence.drop_duplicates(subset=["gameId", "playId", "team", "player_id"])
-    if presence.empty:
+    # Aggregate slot-by-slot to avoid building one massive melted dataframe for multi-season selections.
+    slot_aggs: list[pd.DataFrame] = []
+    stat_cols = ["team", "epa", "success_flag", "pass_flag", "run_flag", "pass_epa", "run_epa"]
+    for slot_col in player_cols:
+        slot_df = role_part[stat_cols + [slot_col]].rename(columns={slot_col: "player_id"})
+        slot_df = slot_df.dropna(subset=["player_id"])
+        if slot_df.empty:
+            continue
+        slot_df["player_id"] = normalize_str(slot_df["player_id"].astype("string"))
+        slot_df = slot_df[slot_df["player_id"].str.len() > 0]
+        if slot_df.empty:
+            continue
+        slot_agg = (
+            slot_df.groupby(["team", "player_id"], dropna=False)
+            .agg(
+                on_plays=("epa", "size"),
+                on_epa_sum=("epa", "sum"),
+                on_success_sum=("success_flag", "sum"),
+                on_pass_sum=("pass_flag", "sum"),
+                on_run_sum=("run_flag", "sum"),
+                on_pass_epa_sum=("pass_epa", "sum"),
+                on_run_epa_sum=("run_epa", "sum"),
+            )
+            .reset_index()
+        )
+        slot_aggs.append(slot_agg)
+
+    if not slot_aggs:
         return pd.DataFrame()
 
     on_stats = (
-        presence.groupby(["team", "player_id"], dropna=False)
+        pd.concat(slot_aggs, ignore_index=True)
+        .groupby(["team", "player_id"], dropna=False)
         .agg(
-            on_plays=("epa", "size"),
-            on_epa_sum=("epa", "sum"),
-            on_success_sum=("success_flag", "sum"),
-            on_pass_sum=("pass_flag", "sum"),
-            on_run_sum=("run_flag", "sum"),
-            on_pass_epa_sum=("pass_epa", "sum"),
-            on_run_epa_sum=("run_epa", "sum"),
+            on_plays=("on_plays", "sum"),
+            on_epa_sum=("on_epa_sum", "sum"),
+            on_success_sum=("on_success_sum", "sum"),
+            on_pass_sum=("on_pass_sum", "sum"),
+            on_run_sum=("on_run_sum", "sum"),
+            on_pass_epa_sum=("on_pass_epa_sum", "sum"),
+            on_run_epa_sum=("on_run_epa_sum", "sum"),
         )
         .reset_index()
     )
