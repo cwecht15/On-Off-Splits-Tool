@@ -554,7 +554,9 @@ def top_player_diffs(
 
     player_cols = [f"P{i}" for i in range(1, 16)]
     role_part = part_wide[part_wide["role"] == role][["gameId", "playId", "team"] + player_cols]
-    play_core = team_plays[["gameId", "playId", team_col, "epa", "success_flag", "pass_flag", "run_flag"]].rename(
+    play_core = team_plays[
+        ["gameId", "playId", team_col, "epa", "success_flag", "pass_flag", "run_flag", "pass_epa", "run_epa"]
+    ].rename(
         columns={team_col: "team"}
     )
     role_part = role_part.merge(play_core, on=["gameId", "playId", "team"], how="inner")
