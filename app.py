@@ -195,22 +195,12 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     plays = plays.merge(pp[["playId", "personnel"]], on="playId", how="left")
 
     player_cols = [f"P{i}" for i in range(1, 16)]
-    part_long = (
-        participation.melt(
-            id_vars=["gameId", "playId", "season", "seasonType", "week", "team", "role"],
-            value_vars=player_cols,
-            var_name="slot",
-            value_name="player_id",
-        )
-        .drop(columns=["slot"])
-        .dropna(subset=["player_id"])
-    )
-    part_long["player_id"] = normalize_str(part_long["player_id"])
-    part_long = part_long[part_long["player_id"].str.len() > 0].copy()
-    part_long["seasonType"] = normalize_str(part_long["seasonType"]).str.upper()
-    part_long["team"] = normalize_team(part_long["team"])
-    part_long["role"] = normalize_str(part_long["role"]).str.lower()
-    part_long["display_week"] = map_display_week(part_long["week"], part_long["seasonType"])
+    participation["seasonType"] = normalize_str(participation["seasonType"]).str.upper()
+    participation["team"] = normalize_team(participation["team"])
+    participation["role"] = normalize_str(participation["role"]).str.lower()
+    participation["display_week"] = map_display_week(participation["week"], participation["seasonType"])
+    for col in player_cols:
+        participation[col] = normalize_str(participation[col].astype("string"))
 
     rosters = rosters.rename(
         columns={
@@ -232,11 +222,11 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     for col in ["seasonType", "offense", "defense"]:
         plays[col] = plays[col].astype("category")
     for col in ["seasonType", "team", "role"]:
-        part_long[col] = part_long[col].astype("category")
+        participation[col] = participation[col].astype("category")
     for col in ["seasonType", "team", "position"]:
         rosters[col] = rosters[col].astype("category")
 
-    return plays, part_long, rosters
+    return plays, participation, rosters
 
 
 def build_success_flag(df: pd.DataFrame) -> pd.Series:
@@ -340,7 +330,7 @@ def apply_margin_filter(df: pd.DataFrame, role: str, margin_range: tuple[int, in
 
 
 def get_on_keys(
-    part_long: pd.DataFrame,
+    part_wide: pd.DataFrame,
     team: str,
     role: str,
     selected_player_ids: list[str],
@@ -349,25 +339,26 @@ def get_on_keys(
     if not selected_player_ids:
         return pd.DataFrame(columns=["gameId", "playId", "is_on"])
 
-    subset = part_long[
-        (part_long["team"] == team)
-        & (part_long["role"] == role)
-        & (part_long["player_id"].isin(selected_player_ids))
-    ][["gameId", "playId", "player_id"]]
+    player_cols = [f"P{i}" for i in range(1, 16)]
+    subset = part_wide[
+        (part_wide["team"] == team)
+        & (part_wide["role"] == role)
+    ][["gameId", "playId"] + player_cols]
 
     if subset.empty:
         return pd.DataFrame(columns=["gameId", "playId", "is_on"])
 
+    clean_ids = [pid for pid in sorted(set(selected_player_ids)) if isinstance(pid, str) and pid]
+    if not clean_ids:
+        return pd.DataFrame(columns=["gameId", "playId", "is_on"])
+
     if on_mode == "All selected players on field":
-        need = len(set(selected_player_ids))
-        keys = (
-            subset.groupby(["gameId", "playId"]) ["player_id"]
-            .nunique()
-            .reset_index(name="player_cnt")
-        )
-        keys = keys[keys["player_cnt"] >= need][["gameId", "playId"]]
+        masks = [subset[player_cols].eq(pid).any(axis=1) for pid in clean_ids]
+        on_mask = np.logical_and.reduce(masks) if masks else pd.Series(False, index=subset.index)
     else:
-        keys = subset[["gameId", "playId"]].drop_duplicates()
+        on_mask = subset[player_cols].isin(clean_ids).any(axis=1)
+
+    keys = subset.loc[on_mask, ["gameId", "playId"]].drop_duplicates()
 
     keys["is_on"] = 1
     return keys
@@ -375,7 +366,7 @@ def get_on_keys(
 
 def split_for_role(
     plays: pd.DataFrame,
-    part_long: pd.DataFrame,
+    part_wide: pd.DataFrame,
     team: str,
     selected_player_ids: list[str],
     role: str,
@@ -392,7 +383,7 @@ def split_for_role(
     if team_plays.empty:
         return pd.DataFrame(columns=["Split", "Plays", "EPA/play", "Success Rate", "Pass Rate", "Run Rate"]), pd.DataFrame()
 
-    on_keys = get_on_keys(part_long, team, role, selected_player_ids, on_mode)
+    on_keys = get_on_keys(part_wide, team, role, selected_player_ids, on_mode)
     team_plays = team_plays.merge(on_keys, on=["gameId", "playId"], how="left")
     team_plays["is_on"] = team_plays["is_on"].fillna(0).astype(int)
 
@@ -450,7 +441,7 @@ def baseline_table(
 
 def trend_table(
     plays: pd.DataFrame,
-    part_long: pd.DataFrame,
+    part_wide: pd.DataFrame,
     team: str,
     selected_player_ids: list[str],
     role: str,
@@ -466,7 +457,7 @@ def trend_table(
     if team_plays.empty:
         return pd.DataFrame(columns=["display_week", "On EPA/play", "Off EPA/play", "On Plays", "Off Plays"])
 
-    on_keys = get_on_keys(part_long, team, role, selected_player_ids, on_mode)
+    on_keys = get_on_keys(part_wide, team, role, selected_player_ids, on_mode)
     team_plays = team_plays.merge(on_keys, on=["gameId", "playId"], how="left")
     team_plays["is_on"] = team_plays["is_on"].fillna(0).astype(int)
 
@@ -613,7 +604,7 @@ def build_pdf_bytes(
     return raw
 
 
-plays, part_long, rosters = load_data()
+plays, part_wide, rosters = load_data()
 
 st.title("NFL Player On/Off Splits")
 st.caption("Weeks 1-18 are regular season and 19-22 are playoffs. Excludes no-play, spikes, kneels, 2PT attempts, and special teams plays.")
@@ -622,7 +613,7 @@ all_seasons = sorted([int(x) for x in plays["season"].dropna().unique()])
 selected_seasons = st.sidebar.multiselect("Seasons", all_seasons, default=all_seasons)
 
 base_filtered = plays
-part_filtered = part_long
+part_filtered = part_wide
 roster_filtered = rosters
 
 if selected_seasons:
@@ -748,7 +739,7 @@ selection_payload = {
 
 offense_table, offense_personnel = split_for_role(
     plays=base_filtered,
-    part_long=part_filtered,
+    part_wide=part_filtered,
     team=team,
     selected_player_ids=selected_player_ids,
     role="offense",
@@ -757,7 +748,7 @@ offense_table, offense_personnel = split_for_role(
 )
 defense_table, defense_personnel = split_for_role(
     plays=base_filtered,
-    part_long=part_filtered,
+    part_wide=part_filtered,
     team=team,
     selected_player_ids=selected_player_ids,
     role="defense",
