@@ -474,6 +474,150 @@ def trend_table(
     return out
 
 
+def build_player_name_lookup(rosters: pd.DataFrame) -> pd.DataFrame:
+    if rosters.empty:
+        return pd.DataFrame(columns=["player_id", "player_name"])
+
+    preferred_first = normalize_str(rosters["FootballName"])
+    fallback_first = normalize_str(rosters["FirstName"])
+    last_name = normalize_str(rosters["LastName"])
+    first_name = preferred_first.where(preferred_first.str.len() > 0, fallback_first)
+    full_name = (first_name + " " + last_name).str.strip()
+    full_name = full_name.where(full_name.str.len() > 0, first_name)
+
+    lookup = pd.DataFrame({"player_id": normalize_str(rosters["player_id"]), "player_name": full_name})
+    lookup = lookup[lookup["player_id"].str.len() > 0]
+    lookup = lookup[lookup["player_name"].str.len() > 0]
+    lookup = lookup.drop_duplicates(subset=["player_id"], keep="first")
+    return lookup
+
+
+def top_player_diffs(
+    plays: pd.DataFrame,
+    part_wide: pd.DataFrame,
+    rosters: pd.DataFrame,
+    role: str,
+    margin_range: tuple[int, int],
+    min_plays: int,
+    top_n: int = 50,
+) -> pd.DataFrame:
+    team_col = "offense" if role == "offense" else "defense"
+    team_plays = apply_margin_filter(plays, role, margin_range).copy()
+    if team_plays.empty:
+        return pd.DataFrame()
+
+    team_plays["success_flag"] = build_success_flag(team_plays).astype(int)
+    team_plays["pass_flag"] = (team_plays["pass_play"] == 1).astype(int)
+    team_plays["run_flag"] = (team_plays["run_play"] == 1).astype(int)
+
+    totals = (
+        team_plays.groupby(team_col, dropna=False)
+        .agg(
+            total_plays=("epa", "size"),
+            total_epa_sum=("epa", "sum"),
+            total_success_sum=("success_flag", "sum"),
+            total_pass_sum=("pass_flag", "sum"),
+            total_run_sum=("run_flag", "sum"),
+        )
+        .reset_index()
+        .rename(columns={team_col: "team"})
+    )
+
+    player_cols = [f"P{i}" for i in range(1, 16)]
+    role_part = part_wide[part_wide["role"] == role][["gameId", "playId", "team"] + player_cols]
+    play_core = team_plays[["gameId", "playId", team_col, "epa", "success_flag", "pass_flag", "run_flag"]].rename(
+        columns={team_col: "team"}
+    )
+    role_part = role_part.merge(play_core, on=["gameId", "playId", "team"], how="inner")
+    if role_part.empty:
+        return pd.DataFrame()
+
+    presence = role_part.melt(
+        id_vars=["gameId", "playId", "team", "epa", "success_flag", "pass_flag", "run_flag"],
+        value_vars=player_cols,
+        value_name="player_id",
+    )
+    presence = presence.drop(columns=["variable"]).dropna(subset=["player_id"])
+    presence["player_id"] = normalize_str(presence["player_id"].astype("string"))
+    presence = presence[presence["player_id"].str.len() > 0]
+    presence = presence.drop_duplicates(subset=["gameId", "playId", "team", "player_id"])
+    if presence.empty:
+        return pd.DataFrame()
+
+    on_stats = (
+        presence.groupby(["team", "player_id"], dropna=False)
+        .agg(
+            on_plays=("epa", "size"),
+            on_epa_sum=("epa", "sum"),
+            on_success_sum=("success_flag", "sum"),
+            on_pass_sum=("pass_flag", "sum"),
+            on_run_sum=("run_flag", "sum"),
+        )
+        .reset_index()
+    )
+
+    out = on_stats.merge(totals, on="team", how="left")
+    out["off_plays"] = out["total_plays"] - out["on_plays"]
+    out = out[(out["on_plays"] > 0) & (out["off_plays"] > 0)]
+    out = out[(out["on_plays"] >= min_plays) & (out["off_plays"] >= min_plays)]
+    if out.empty:
+        return pd.DataFrame()
+
+    out["on_epa_play"] = out["on_epa_sum"] / out["on_plays"]
+    out["off_epa_play"] = (out["total_epa_sum"] - out["on_epa_sum"]) / out["off_plays"]
+    out["on_success_rate"] = out["on_success_sum"] / out["on_plays"]
+    out["off_success_rate"] = (out["total_success_sum"] - out["on_success_sum"]) / out["off_plays"]
+    out["on_pass_rate"] = out["on_pass_sum"] / out["on_plays"]
+    out["off_pass_rate"] = (out["total_pass_sum"] - out["on_pass_sum"]) / out["off_plays"]
+    out["on_run_rate"] = out["on_run_sum"] / out["on_plays"]
+    out["off_run_rate"] = (out["total_run_sum"] - out["on_run_sum"]) / out["off_plays"]
+
+    out["epa_delta"] = out["on_epa_play"] - out["off_epa_play"]
+    out["success_delta"] = out["on_success_rate"] - out["off_success_rate"]
+    out["abs_epa_delta"] = out["epa_delta"].abs()
+
+    player_lookup = build_player_name_lookup(rosters)
+    out = out.merge(player_lookup, on="player_id", how="left")
+    out["player_name"] = out["player_name"].fillna("Unknown")
+    out["Player"] = out["player_name"] + " (" + out["player_id"] + ")"
+
+    out = out.sort_values(["abs_epa_delta", "on_plays"], ascending=[False, False]).head(top_n).copy()
+    return out[
+        [
+            "Player",
+            "team",
+            "on_plays",
+            "off_plays",
+            "on_epa_play",
+            "off_epa_play",
+            "epa_delta",
+            "on_success_rate",
+            "off_success_rate",
+            "success_delta",
+            "on_pass_rate",
+            "off_pass_rate",
+            "on_run_rate",
+            "off_run_rate",
+        ]
+    ].rename(
+        columns={
+            "team": "Team",
+            "on_plays": "On Plays",
+            "off_plays": "Off Plays",
+            "on_epa_play": "On EPA/play",
+            "off_epa_play": "Off EPA/play",
+            "epa_delta": "EPA Delta",
+            "on_success_rate": "On Success Rate",
+            "off_success_rate": "Off Success Rate",
+            "success_delta": "Success Delta",
+            "on_pass_rate": "On Pass Rate",
+            "off_pass_rate": "Off Pass Rate",
+            "on_run_rate": "On Run Rate",
+            "off_run_rate": "Off Run Rate",
+        }
+    )
+
+
 def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
@@ -714,6 +858,7 @@ score_margin_range = st.sidebar.slider("Score margin (team perspective)", min_va
 
 min_play_threshold = st.sidebar.number_input("Minimum plays (On and Off)", min_value=0, value=0, step=10)
 on_mode = st.sidebar.radio("On definition", ["Any selected player on field", "All selected players on field"], index=0)
+leaderboard_min_plays = st.sidebar.number_input("Leaderboard min plays (On and Off)", min_value=1, value=100, step=10)
 
 base_filtered = apply_common_filters(
     base_filtered,
@@ -769,12 +914,40 @@ defense_baseline = baseline_table(base_filtered, team=team, role="defense", marg
 
 offense_trend = trend_table(base_filtered, part_filtered, team, selected_player_ids, "offense", on_mode, score_margin_range)
 defense_trend = trend_table(base_filtered, part_filtered, team, selected_player_ids, "defense", on_mode, score_margin_range)
+top_offense = top_player_diffs(
+    plays=base_filtered,
+    part_wide=part_filtered,
+    rosters=roster_filtered,
+    role="offense",
+    margin_range=score_margin_range,
+    min_plays=int(leaderboard_min_plays),
+    top_n=50,
+)
+top_defense = top_player_diffs(
+    plays=base_filtered,
+    part_wide=part_filtered,
+    rosters=roster_filtered,
+    role="defense",
+    margin_range=score_margin_range,
+    min_plays=int(leaderboard_min_plays),
+    top_n=50,
+)
 
 formatters = {
     "EPA/play": "{:.3f}",
     "Success Rate": "{:.1%}",
     "Pass Rate": "{:.1%}",
     "Run Rate": "{:.1%}",
+    "On EPA/play": "{:.3f}",
+    "Off EPA/play": "{:.3f}",
+    "EPA Delta": "{:.3f}",
+    "On Success Rate": "{:.1%}",
+    "Off Success Rate": "{:.1%}",
+    "Success Delta": "{:.1%}",
+    "On Pass Rate": "{:.1%}",
+    "Off Pass Rate": "{:.1%}",
+    "On Run Rate": "{:.1%}",
+    "Off Run Rate": "{:.1%}",
 }
 
 col1, col2 = st.columns(2)
@@ -833,6 +1006,18 @@ if defense_personnel.empty:
     st.info("No defense personnel rows.")
 else:
     st.dataframe(defense_personnel.style.format(formatters), width="stretch")
+
+st.markdown("### Top 50 Offensive Players By Absolute EPA Delta")
+if top_offense.empty:
+    st.info("No offensive leaderboard rows for current filters.")
+else:
+    st.dataframe(top_offense.style.format(formatters), width="stretch")
+
+st.markdown("### Top 50 Defensive Players By Absolute EPA Delta")
+if top_defense.empty:
+    st.info("No defensive leaderboard rows for current filters.")
+else:
+    st.dataframe(top_defense.style.format(formatters), width="stretch")
 
 st.markdown("### Export")
 export_col1, export_col2 = st.columns(2)
