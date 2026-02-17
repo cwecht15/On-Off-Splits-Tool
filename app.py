@@ -562,7 +562,7 @@ def top_player_diffs(
         return pd.DataFrame()
 
     presence = role_part.melt(
-        id_vars=["gameId", "playId", "team", "epa", "success_flag", "pass_flag", "run_flag"],
+        id_vars=["gameId", "playId", "team", "epa", "success_flag", "pass_flag", "run_flag", "pass_epa", "run_epa"],
         value_vars=player_cols,
         value_name="player_id",
     )
