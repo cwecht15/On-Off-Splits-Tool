@@ -520,6 +520,10 @@ def top_player_diffs(
     leaderboard_team: str | None = None,
     top_n: int = 50,
 ) -> pd.DataFrame:
+    def safe_div(num: pd.Series, den: pd.Series) -> pd.Series:
+        den = den.replace(0, np.nan)
+        return num / den
+
     team_col = "offense" if role == "offense" else "defense"
     team_plays = plays.copy()
     if leaderboard_team:
@@ -530,6 +534,8 @@ def top_player_diffs(
     team_plays["success_flag"] = build_success_flag(team_plays).astype(int)
     team_plays["pass_flag"] = (team_plays["pass_play"] == 1).astype(int)
     team_plays["run_flag"] = (team_plays["run_play"] == 1).astype(int)
+    team_plays["pass_epa"] = np.where(team_plays["pass_flag"] == 1, team_plays["epa"], 0.0)
+    team_plays["run_epa"] = np.where(team_plays["run_flag"] == 1, team_plays["epa"], 0.0)
 
     totals = (
         team_plays.groupby(team_col, dropna=False)
@@ -539,6 +545,8 @@ def top_player_diffs(
             total_success_sum=("success_flag", "sum"),
             total_pass_sum=("pass_flag", "sum"),
             total_run_sum=("run_flag", "sum"),
+            total_pass_epa_sum=("pass_epa", "sum"),
+            total_run_epa_sum=("run_epa", "sum"),
         )
         .reset_index()
         .rename(columns={team_col: "team"})
@@ -573,6 +581,8 @@ def top_player_diffs(
             on_success_sum=("success_flag", "sum"),
             on_pass_sum=("pass_flag", "sum"),
             on_run_sum=("run_flag", "sum"),
+            on_pass_epa_sum=("pass_epa", "sum"),
+            on_run_epa_sum=("run_epa", "sum"),
         )
         .reset_index()
     )
@@ -592,8 +602,16 @@ def top_player_diffs(
     out["off_pass_rate"] = (out["total_pass_sum"] - out["on_pass_sum"]) / out["off_plays"]
     out["on_run_rate"] = out["on_run_sum"] / out["on_plays"]
     out["off_run_rate"] = (out["total_run_sum"] - out["on_run_sum"]) / out["off_plays"]
+    out["off_pass_plays"] = out["total_pass_sum"] - out["on_pass_sum"]
+    out["off_run_plays"] = out["total_run_sum"] - out["on_run_sum"]
+    out["on_pass_epa_play"] = safe_div(out["on_pass_epa_sum"], out["on_pass_sum"])
+    out["off_pass_epa_play"] = safe_div(out["total_pass_epa_sum"] - out["on_pass_epa_sum"], out["off_pass_plays"])
+    out["on_run_epa_play"] = safe_div(out["on_run_epa_sum"], out["on_run_sum"])
+    out["off_run_epa_play"] = safe_div(out["total_run_epa_sum"] - out["on_run_epa_sum"], out["off_run_plays"])
 
     out["epa_delta"] = out["on_epa_play"] - out["off_epa_play"]
+    out["pass_epa_delta"] = out["on_pass_epa_play"] - out["off_pass_epa_play"]
+    out["run_epa_delta"] = out["on_run_epa_play"] - out["off_run_epa_play"]
     out["success_delta"] = out["on_success_rate"] - out["off_success_rate"]
     out["abs_epa_delta"] = out["epa_delta"].abs()
 
@@ -614,6 +632,8 @@ def top_player_diffs(
             "on_epa_play",
             "off_epa_play",
             "epa_delta",
+            "pass_epa_delta",
+            "run_epa_delta",
             "on_success_rate",
             "off_success_rate",
             "success_delta",
@@ -631,6 +651,8 @@ def top_player_diffs(
             "on_epa_play": "On EPA/play",
             "off_epa_play": "Off EPA/play",
             "epa_delta": "EPA Delta",
+            "pass_epa_delta": "Pass EPA Delta",
+            "run_epa_delta": "Rush EPA Delta",
             "on_success_rate": "On Success Rate",
             "off_success_rate": "Off Success Rate",
             "success_delta": "Success Delta",
@@ -973,6 +995,8 @@ formatters = {
     "On EPA/play": "{:.3f}",
     "Off EPA/play": "{:.3f}",
     "EPA Delta": "{:.3f}",
+    "Pass EPA Delta": "{:.3f}",
+    "Rush EPA Delta": "{:.3f}",
     "On Success Rate": "{:.1%}",
     "Off Success Rate": "{:.1%}",
     "Success Delta": "{:.1%}",
