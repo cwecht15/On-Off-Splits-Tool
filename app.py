@@ -53,7 +53,9 @@ def normalize_position(series: pd.Series) -> pd.Series:
 
 
 def map_display_week(week: pd.Series, season_type: pd.Series) -> pd.Series:
-    return week + np.where(season_type == "POST", 18, 0)
+    week_num = pd.to_numeric(week, errors="coerce")
+    season_type_norm = normalize_str(season_type).str.upper()
+    return week_num + np.where(season_type_norm == "POST", 18, 0)
 
 
 def _data_url_key(filename: str) -> str:
