@@ -723,6 +723,7 @@ def split_for_role(
     role: str,
     on_mode: str,
     margin_range: tuple[int, int],
+    on_keys: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if role == "offense":
         team_plays = plays[plays["offense"] == team]
@@ -734,7 +735,8 @@ def split_for_role(
     if team_plays.empty:
         return pd.DataFrame(columns=["Split", "Plays", "EPA/play", "Success Rate", "Pass Rate", "Run Rate"]), pd.DataFrame()
 
-    on_keys = get_on_keys(part_wide, team, role, selected_player_ids, on_mode)
+    if on_keys is None:
+        on_keys = get_on_keys(part_wide, team, role, selected_player_ids, on_mode)
     team_plays = team_plays.merge(on_keys, on=["gameId", "playId"], how="left")
     team_plays["is_on"] = team_plays["is_on"].fillna(0).astype(int)
 
@@ -798,6 +800,7 @@ def trend_table(
     role: str,
     on_mode: str,
     margin_range: tuple[int, int],
+    on_keys: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     if role == "offense":
         team_plays = plays[plays["offense"] == team]
@@ -808,7 +811,8 @@ def trend_table(
     if team_plays.empty:
         return pd.DataFrame(columns=["display_week", "On EPA/play", "Off EPA/play", "On Plays", "Off Plays"])
 
-    on_keys = get_on_keys(part_wide, team, role, selected_player_ids, on_mode)
+    if on_keys is None:
+        on_keys = get_on_keys(part_wide, team, role, selected_player_ids, on_mode)
     team_plays = team_plays.merge(on_keys, on=["gameId", "playId"], how="left")
     team_plays["is_on"] = team_plays["is_on"].fillna(0).astype(int)
 
@@ -1547,6 +1551,9 @@ selection_payload = {
     "score_margin": score_margin_range,
 }
 
+offense_on_keys = get_on_keys(part_filtered, team, "offense", selected_player_ids, on_mode)
+defense_on_keys = get_on_keys(part_filtered, team, "defense", selected_player_ids, on_mode)
+
 offense_table, offense_personnel = split_for_role(
     plays=base_filtered,
     part_wide=part_filtered,
@@ -1555,6 +1562,7 @@ offense_table, offense_personnel = split_for_role(
     role="offense",
     on_mode=on_mode,
     margin_range=score_margin_range,
+    on_keys=offense_on_keys,
 )
 defense_table, defense_personnel = split_for_role(
     plays=base_filtered,
@@ -1564,6 +1572,7 @@ defense_table, defense_personnel = split_for_role(
     role="defense",
     on_mode=on_mode,
     margin_range=score_margin_range,
+    on_keys=defense_on_keys,
 )
 
 if min_play_threshold > 0:
@@ -1577,8 +1586,26 @@ if min_play_threshold > 0:
 offense_baseline = baseline_table(base_filtered, team=team, role="offense", margin_range=score_margin_range)
 defense_baseline = baseline_table(base_filtered, team=team, role="defense", margin_range=score_margin_range)
 
-offense_trend = trend_table(base_filtered, part_filtered, team, selected_player_ids, "offense", on_mode, score_margin_range)
-defense_trend = trend_table(base_filtered, part_filtered, team, selected_player_ids, "defense", on_mode, score_margin_range)
+offense_trend = trend_table(
+    base_filtered,
+    part_filtered,
+    team,
+    selected_player_ids,
+    "offense",
+    on_mode,
+    score_margin_range,
+    on_keys=offense_on_keys,
+)
+defense_trend = trend_table(
+    base_filtered,
+    part_filtered,
+    team,
+    selected_player_ids,
+    "defense",
+    on_mode,
+    score_margin_range,
+    on_keys=defense_on_keys,
+)
 top_offense = top_player_diffs(
     plays=leaderboard_plays,
     part_wide=part_filtered,
