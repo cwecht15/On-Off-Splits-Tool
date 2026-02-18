@@ -144,130 +144,99 @@ def get_postgres_config() -> dict[str, str] | None:
 
 
 def load_raw_data_from_postgres(pg_cfg: dict[str, str]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    def fetch_all(conn: psycopg.Connection, table_name: str, label: str) -> pd.DataFrame:
-        sql = f"SELECT * FROM {_table_ident(table_name)}"
+    def fetch_cols(conn: psycopg.Connection, table_name: str, cols: list[str]) -> pd.DataFrame:
+        quoted_cols = ", ".join(f'"{c}"' for c in cols)
+        sql = f"SELECT {quoted_cols} FROM {_table_ident(table_name)}"
         with conn.cursor() as cur:
             cur.execute(sql)
             rows = cur.fetchall()
             cols = [desc.name for desc in cur.description]
         return pd.DataFrame(rows, columns=cols)
 
+    part_cols = [
+        "gameId",
+        "season",
+        "seasonType",
+        "week",
+        "playId",
+        "team",
+        "role",
+    ] + [f"P{i}" for i in range(1, 16)]
+    pbp_cols = [
+        "season",
+        "seas_type",
+        "week",
+        "game_id",
+        "play_id",
+        "offense",
+        "defense",
+        "passer_id",
+        "target",
+        "receiver_id",
+        "runner_id",
+        "no_rush_player_id",
+        "no_reception_player_1_id",
+        "no_reception_player_2_id",
+        "fumble_lost_player_1_id",
+        "fumble_lost_player_2_id",
+        "offense_score",
+        "defense_score",
+        "quarter",
+        "down",
+        "distance",
+        "yards_to_score",
+        "pass_play",
+        "run_play",
+        "no_play",
+        "spiked_ball",
+        "kneel_down",
+        "two_point_att",
+        "kickoff",
+        "punt",
+        "field_goal",
+        "extra_point",
+        "attempt",
+        "dropback",
+        "sack",
+        "scramble",
+        "rec_yards",
+        "reception",
+        "intercepted",
+        "passing_touchdown",
+        "rush_attempt",
+        "rushing_touchdown",
+        "no_rush_yards",
+        "no_rush_touchdown",
+        "no_reception_yards_1",
+        "no_reception_yards_2",
+        "no_reception_touchdown_1",
+        "no_reception_touchdown_2",
+        "passing_yards",
+        "rushing_yards",
+    ]
+    epa_cols = ["gameId", "playId", "epa"]
+    roster_cols = [
+        "Season",
+        "SeasonType",
+        "Week",
+        "GsisID",
+        "FirstName",
+        "LastName",
+        "FootballName",
+        "CurrentClub",
+        "Position",
+        "StatusShortDescription",
+    ]
+    pp_cols = ["play id", "offense", "personnel"]
+
     with psycopg.connect(pg_cfg["dsn"], connect_timeout=15) as conn:
-        part_raw = fetch_all(conn, pg_cfg["participation"], "participation")
-        pbp_raw = fetch_all(conn, pg_cfg["play_by_play_data"], "play_by_play_data")
-        epa_raw = fetch_all(conn, pg_cfg["epa"], "epa")
-        rosters_raw = fetch_all(conn, pg_cfg["weekly_rosters"], "weekly_rosters")
-        pp_raw = fetch_all(conn, pg_cfg["pp_data"], "pp_data")
+        participation = fetch_cols(conn, pg_cfg["participation"], part_cols)
+        pbp = fetch_cols(conn, pg_cfg["play_by_play_data"], pbp_cols)
+        epa = fetch_cols(conn, pg_cfg["epa"], epa_cols)
+        rosters = fetch_cols(conn, pg_cfg["weekly_rosters"], roster_cols)
+        pp = fetch_cols(conn, pg_cfg["pp_data"], pp_cols)
 
-    participation = _extract_columns(
-        part_raw,
-        {
-            "gameId": ["gameId", "game_id"],
-            "season": ["season"],
-            "seasonType": ["seasonType", "season_type", "seas_type"],
-            "week": ["week"],
-            "playId": ["playId", "play_id"],
-            "team": ["team"],
-            "role": ["role"],
-            **{f"P{i}": [f"P{i}", f"p{i}"] for i in range(1, 16)},
-        },
-        "participation",
-    )
-
-    pbp = _extract_columns(
-        pbp_raw,
-        {
-            "season": ["season"],
-            "seasonType": ["seas_type", "seasonType", "season_type"],
-            "week": ["week"],
-            "gameId": ["game_id", "gameId"],
-            "playId": ["play_id", "playId"],
-            "offense": ["offense"],
-            "defense": ["defense"],
-            "passer_id": ["passer_id", "passerid"],
-            "target": ["target"],
-            "receiver_id": ["receiver_id", "receiverid"],
-            "runner_id": ["runner_id", "runnerid"],
-            "no_rush_player_id": ["no_rush_player_id", "norushplayerid"],
-            "no_reception_player_1_id": ["no_reception_player_1_id", "no_reception_player_id_1"],
-            "no_reception_player_2_id": ["no_reception_player_2_id", "no_reception_player_id_2"],
-            "fumble_lost_player_1_id": ["fumble_lost_player_1_id", "fumble_lost_player_id_1", "fumble_lost_player_id"],
-            "fumble_lost_player_2_id": ["fumble_lost_player_2_id", "fumble_lost_player_id_2"],
-            "offense_score": ["offense_score"],
-            "defense_score": ["defense_score"],
-            "quarter": ["quarter", "qtr"],
-            "down": ["down"],
-            "distance": ["distance", "ydstogo"],
-            "yards_to_score": ["yards_to_score", "yardline_100"],
-            "pass_play": ["pass_play"],
-            "run_play": ["run_play"],
-            "no_play": ["no_play"],
-            "spiked_ball": ["spiked_ball", "spike"],
-            "kneel_down": ["kneel_down"],
-            "two_point_att": ["two_point_att", "two_point_attempt"],
-            "kickoff": ["kickoff"],
-            "punt": ["punt"],
-            "field_goal": ["field_goal"],
-            "extra_point": ["extra_point"],
-            "attempt": ["attempt", "pass_attempt"],
-            "dropback": ["dropback"],
-            "sack": ["sack"],
-            "scramble": ["scramble"],
-            "rec_yards": ["rec_yards", "receiving_yards"],
-            "reception": ["reception"],
-            "intercepted": ["intercepted", "interception"],
-            "passing_touchdown": ["passing_touchdown", "pass_touchdown"],
-            "rush_attempt": ["rush_attempt"],
-            "rushing_touchdown": ["rushing_touchdown", "rush_touchdown"],
-            "no_rush_yards": ["no_rush_yards"],
-            "no_rush_touchdown": ["no_rush_touchdown"],
-            "no_reception_yards_1": ["no_reception_yards_1"],
-            "no_reception_yards_2": ["no_reception_yards_2"],
-            "no_reception_touchdown_1": ["no_reception_touchdown_1"],
-            "no_reception_touchdown_2": ["no_reception_touchdown_2"],
-            "passing_yards": ["passing_yards"],
-            "rushing_yards": ["rushing_yards"],
-        },
-        "play_by_play_data",
-    )
-
-    epa = _extract_columns(
-        epa_raw,
-        {
-            "gameId": ["gameId", "game_id"],
-            "playId": ["playId", "play_id"],
-            "epa": ["epa"],
-        },
-        "epa",
-    )
-
-    rosters = _extract_columns(
-        rosters_raw,
-        {
-            "Season": ["Season", "season"],
-            "SeasonType": ["SeasonType", "seasonType", "season_type", "seas_type"],
-            "Week": ["Week", "week"],
-            "GsisID": ["GsisID", "gsis_id", "player_id"],
-            "FirstName": ["FirstName", "first_name"],
-            "LastName": ["LastName", "last_name"],
-            "FootballName": ["FootballName", "football_name"],
-            "CurrentClub": ["CurrentClub", "current_club", "team"],
-            "Position": ["Position", "position"],
-            "StatusShortDescription": ["StatusShortDescription", "status_short_description", "status"],
-        },
-        "weekly_rosters",
-    )
-
-    pp = _extract_columns(
-        pp_raw,
-        {
-            "play id": ["play id", "play_id", "playid"],
-            "offense": ["offense"],
-            "personnel": ["personnel"],
-        },
-        "pp_data",
-    )
-
+    pbp = pbp.rename(columns={"game_id": "gameId", "play_id": "playId", "seas_type": "seasonType"})
     return participation, pbp, epa, rosters, pp
 
 
