@@ -1570,12 +1570,27 @@ if not team_options:
     st.warning("No team options available for selected filters.")
     st.stop()
 
-team = st.sidebar.selectbox("Team", team_options)
+team_select_key = "main_team"
+current_team = st.session_state.get(team_select_key)
+if current_team not in team_options:
+    st.session_state[team_select_key] = team_options[0]
+team = st.sidebar.selectbox("Team", team_options, key=team_select_key)
 
 player_df = roster_filtered[roster_filtered["team"] == team].copy()
 if player_df.empty:
-    st.warning("No players found for selected team and filters.")
-    st.stop()
+    fallback_team = None
+    for t in team_options:
+        candidate = roster_filtered[roster_filtered["team"] == t]
+        if not candidate.empty:
+            fallback_team = t
+            break
+    if fallback_team is not None and fallback_team != team:
+        st.session_state[team_select_key] = fallback_team
+        player_df = roster_filtered[roster_filtered["team"] == fallback_team].copy()
+        team = fallback_team
+    if player_df.empty:
+        st.warning("No players found for selected team and filters.")
+        st.stop()
 
 preferred_first = normalize_str(player_df["FootballName"])
 fallback_first = normalize_str(player_df["FirstName"])
@@ -1640,8 +1655,19 @@ on_mode = st.sidebar.radio("On definition", ["Any selected player on field", "Al
 
 team_scope = base_filtered[(base_filtered["offense"] == team) | (base_filtered["defense"] == team)]
 if team_scope.empty:
-    st.warning("No plays for selected team and season/week filters.")
-    st.stop()
+    fallback_scope_team = None
+    for t in team_options:
+        cand_scope = base_filtered[(base_filtered["offense"] == t) | (base_filtered["defense"] == t)]
+        if not cand_scope.empty:
+            fallback_scope_team = t
+            team_scope = cand_scope
+            break
+    if fallback_scope_team is not None and fallback_scope_team != team:
+        st.session_state[team_select_key] = fallback_scope_team
+        team = fallback_scope_team
+    if team_scope.empty:
+        st.warning("No plays for selected team and season/week filters.")
+        st.stop()
 
 quarter_options = sorted([int(x) for x in team_scope["quarter"].dropna().unique()])
 selected_quarters = st.sidebar.multiselect("Quarter", quarter_options, default=quarter_options)
