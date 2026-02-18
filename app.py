@@ -1570,27 +1570,12 @@ if not team_options:
     st.warning("No team options available for selected filters.")
     st.stop()
 
-team_select_key = "main_team"
-current_team = st.session_state.get(team_select_key)
-if current_team not in team_options:
-    st.session_state[team_select_key] = team_options[0]
-team = st.sidebar.selectbox("Team", team_options, key=team_select_key)
+team = st.sidebar.selectbox("Team", team_options)
 
 player_df = roster_filtered[roster_filtered["team"] == team].copy()
 if player_df.empty:
-    fallback_team = None
-    for t in team_options:
-        candidate = roster_filtered[roster_filtered["team"] == t]
-        if not candidate.empty:
-            fallback_team = t
-            break
-    if fallback_team is not None and fallback_team != team:
-        st.session_state[team_select_key] = fallback_team
-        player_df = roster_filtered[roster_filtered["team"] == fallback_team].copy()
-        team = fallback_team
-    if player_df.empty:
-        st.warning("No players found for selected team and filters.")
-        st.stop()
+    st.warning("No players found for selected team and filters.")
+    st.stop()
 
 preferred_first = normalize_str(player_df["FootballName"])
 fallback_first = normalize_str(player_df["FirstName"])
@@ -1622,22 +1607,10 @@ player_options = player_options.sort_values(["name", "player_id"]).reset_index(d
 
 player_label_options = player_options["label"].tolist()
 valid_player_labels = set(player_label_options)
-player_select_key = "main_selected_players"
-existing_labels = st.session_state.get(player_select_key, [])
-if not isinstance(existing_labels, list):
-    existing_labels = []
-existing_labels = [lbl for lbl in existing_labels if isinstance(lbl, str) and lbl in valid_player_labels]
-if not existing_labels and player_label_options:
-    existing_labels = [player_label_options[0]]
-st.session_state[player_select_key] = existing_labels
-
-selected_labels = st.sidebar.multiselect("Players", player_label_options, key=player_select_key)
+selected_labels = st.sidebar.multiselect("Players", player_label_options, default=player_label_options[:1])
 selected_labels = [lbl for lbl in selected_labels if isinstance(lbl, str) and lbl in valid_player_labels]
-if not selected_labels and player_label_options:
-    st.session_state[player_select_key] = [player_label_options[0]]
-    selected_labels = [player_label_options[0]]
 if not selected_labels:
-    st.warning("No valid player options for this team/season selection.")
+    st.warning("Select at least one player.")
     st.stop()
 
 selected_player_ids = (
@@ -1655,19 +1628,8 @@ on_mode = st.sidebar.radio("On definition", ["Any selected player on field", "Al
 
 team_scope = base_filtered[(base_filtered["offense"] == team) | (base_filtered["defense"] == team)]
 if team_scope.empty:
-    fallback_scope_team = None
-    for t in team_options:
-        cand_scope = base_filtered[(base_filtered["offense"] == t) | (base_filtered["defense"] == t)]
-        if not cand_scope.empty:
-            fallback_scope_team = t
-            team_scope = cand_scope
-            break
-    if fallback_scope_team is not None and fallback_scope_team != team:
-        st.session_state[team_select_key] = fallback_scope_team
-        team = fallback_scope_team
-    if team_scope.empty:
-        st.warning("No plays for selected team and season/week filters.")
-        st.stop()
+    st.warning("No plays for selected team and season/week filters.")
+    st.stop()
 
 quarter_options = sorted([int(x) for x in team_scope["quarter"].dropna().unique()])
 selected_quarters = st.sidebar.multiselect("Quarter", quarter_options, default=quarter_options)
