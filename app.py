@@ -494,6 +494,10 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     ]
     for col in num_cols:
         pbp[col] = pd.to_numeric(pbp[col], errors="coerce")
+    pbp["season"] = pd.to_numeric(pbp["season"], errors="coerce").astype("Int64")
+    pbp["week"] = pd.to_numeric(pbp["week"], errors="coerce").astype("Int64")
+    participation["season"] = pd.to_numeric(participation["season"], errors="coerce").astype("Int64")
+    participation["week"] = pd.to_numeric(participation["week"], errors="coerce").astype("Int64")
 
     pbp["seasonType"] = normalize_str(pbp["seasonType"]).str.upper()
     pbp["offense"] = normalize_team(pbp["offense"])
