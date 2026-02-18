@@ -41,6 +41,22 @@ Notes:
 - Table names are optional if you use defaults above.
 - Per-table env vars are also supported (`POSTGRES_TABLE_PARTICIPATION`, etc.).
 
+## Postgres Data Load (Typed, Recommended)
+
+Use the typed loader script to avoid text-type issues in app metrics.
+
+```powershell
+$env:POSTGRES_DSN = "postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
+python scripts/load_postgres_typed.py --csv-dir .
+```
+
+This script:
+
+- Drops and recreates all five required tables with explicit numeric/text types
+- Loads CSVs via streaming COPY
+- Creates indexes used by app filters/joins
+- Runs `ANALYZE` for better query planning
+
 ## Data Source Configuration
 
 Required files:

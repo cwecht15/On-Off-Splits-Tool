@@ -30,6 +30,13 @@ Set `[postgres]` secrets (see `.streamlit/secrets.example.toml`):
   - `weekly_rosters_table`
   - `pp_data_table`
 
+Before deploying on Postgres, load typed tables:
+
+```powershell
+$env:POSTGRES_DSN = "postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
+python scripts/load_postgres_typed.py --csv-dir .
+```
+
 ### CSV URL fallback
 
 If Postgres is not configured, the app requires external CSV URLs (CSV files are not committed to git):
