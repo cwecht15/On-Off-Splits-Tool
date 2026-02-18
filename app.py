@@ -724,21 +724,25 @@ def split_for_role(
     on_mode: str,
     margin_range: tuple[int, int],
     on_keys: pd.DataFrame | None = None,
+    team_plays_override: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    if role == "offense":
-        team_plays = plays[plays["offense"] == team]
+    if team_plays_override is None:
+        if role == "offense":
+            team_plays = plays[plays["offense"] == team]
+        else:
+            team_plays = plays[plays["defense"] == team]
+        team_plays = apply_margin_filter(team_plays, role, margin_range)
     else:
-        team_plays = plays[plays["defense"] == team]
-
-    team_plays = apply_margin_filter(team_plays, role, margin_range)
+        team_plays = team_plays_override.copy()
 
     if team_plays.empty:
         return pd.DataFrame(columns=["Split", "Plays", "EPA/play", "Success Rate", "Pass Rate", "Run Rate"]), pd.DataFrame()
 
-    if on_keys is None:
-        on_keys = get_on_keys(part_wide, team, role, selected_player_ids, on_mode)
-    team_plays = team_plays.merge(on_keys, on=["gameId", "playId"], how="left")
-    team_plays["is_on"] = team_plays["is_on"].fillna(0).astype(int)
+    if "is_on" not in team_plays.columns:
+        if on_keys is None:
+            on_keys = get_on_keys(part_wide, team, role, selected_player_ids, on_mode)
+        team_plays = team_plays.merge(on_keys, on=["gameId", "playId"], how="left")
+        team_plays["is_on"] = team_plays["is_on"].fillna(0).astype(int)
 
     on_summary = summarize(team_plays[team_plays["is_on"] == 1])
     off_summary = summarize(team_plays[team_plays["is_on"] == 0])
@@ -801,20 +805,25 @@ def trend_table(
     on_mode: str,
     margin_range: tuple[int, int],
     on_keys: pd.DataFrame | None = None,
+    team_plays_override: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    if role == "offense":
-        team_plays = plays[plays["offense"] == team]
+    if team_plays_override is None:
+        if role == "offense":
+            team_plays = plays[plays["offense"] == team]
+        else:
+            team_plays = plays[plays["defense"] == team]
+        team_plays = apply_margin_filter(team_plays, role, margin_range)
     else:
-        team_plays = plays[plays["defense"] == team]
+        team_plays = team_plays_override.copy()
 
-    team_plays = apply_margin_filter(team_plays, role, margin_range)
     if team_plays.empty:
         return pd.DataFrame(columns=["display_week", "On EPA/play", "Off EPA/play", "On Plays", "Off Plays"])
 
-    if on_keys is None:
-        on_keys = get_on_keys(part_wide, team, role, selected_player_ids, on_mode)
-    team_plays = team_plays.merge(on_keys, on=["gameId", "playId"], how="left")
-    team_plays["is_on"] = team_plays["is_on"].fillna(0).astype(int)
+    if "is_on" not in team_plays.columns:
+        if on_keys is None:
+            on_keys = get_on_keys(part_wide, team, role, selected_player_ids, on_mode)
+        team_plays = team_plays.merge(on_keys, on=["gameId", "playId"], how="left")
+        team_plays["is_on"] = team_plays["is_on"].fillna(0).astype(int)
 
     agg = (
         team_plays.groupby(["display_week", "is_on"], dropna=False)
@@ -1553,6 +1562,12 @@ selection_payload = {
 
 offense_on_keys = get_on_keys(part_filtered, team, "offense", selected_player_ids, on_mode)
 defense_on_keys = get_on_keys(part_filtered, team, "defense", selected_player_ids, on_mode)
+offense_team_plays = apply_margin_filter(base_filtered[base_filtered["offense"] == team], "offense", score_margin_range)
+defense_team_plays = apply_margin_filter(base_filtered[base_filtered["defense"] == team], "defense", score_margin_range)
+offense_tagged_plays = offense_team_plays.merge(offense_on_keys, on=["gameId", "playId"], how="left")
+offense_tagged_plays["is_on"] = offense_tagged_plays["is_on"].fillna(0).astype(int)
+defense_tagged_plays = defense_team_plays.merge(defense_on_keys, on=["gameId", "playId"], how="left")
+defense_tagged_plays["is_on"] = defense_tagged_plays["is_on"].fillna(0).astype(int)
 
 offense_table, offense_personnel = split_for_role(
     plays=base_filtered,
@@ -1563,6 +1578,7 @@ offense_table, offense_personnel = split_for_role(
     on_mode=on_mode,
     margin_range=score_margin_range,
     on_keys=offense_on_keys,
+    team_plays_override=offense_tagged_plays,
 )
 defense_table, defense_personnel = split_for_role(
     plays=base_filtered,
@@ -1573,6 +1589,7 @@ defense_table, defense_personnel = split_for_role(
     on_mode=on_mode,
     margin_range=score_margin_range,
     on_keys=defense_on_keys,
+    team_plays_override=defense_tagged_plays,
 )
 
 if min_play_threshold > 0:
@@ -1595,6 +1612,7 @@ offense_trend = trend_table(
     on_mode,
     score_margin_range,
     on_keys=offense_on_keys,
+    team_plays_override=offense_tagged_plays,
 )
 defense_trend = trend_table(
     base_filtered,
@@ -1605,6 +1623,7 @@ defense_trend = trend_table(
     on_mode,
     score_margin_range,
     on_keys=defense_on_keys,
+    team_plays_override=defense_tagged_plays,
 )
 top_offense = top_player_diffs(
     plays=leaderboard_plays,
