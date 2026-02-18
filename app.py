@@ -1245,134 +1245,133 @@ formatters = {
     "Receiving TD Share": "{:.1%}",
 }
 
-col1, col2 = st.columns(2)
-with col1:
-    st.markdown("### Offense On/Off")
-    if offense_table.empty:
-        st.info("No offense rows for this selection.")
-    else:
-        st.dataframe(offense_table.style.format(formatters), width="stretch")
+tab_onoff, tab_status = st.tabs(["On/Off View", "Snap-Threshold Splits"])
 
-    st.markdown("### Offense Baseline (Team vs League)")
-    st.dataframe(offense_baseline.style.format(formatters), width="stretch")
-
-with col2:
-    st.markdown("### Defense On/Off")
-    if defense_table.empty:
-        st.info("No defense rows for this selection.")
-    else:
-        st.dataframe(defense_table.style.format(formatters), width="stretch")
-
-    st.markdown("### Defense Baseline (Team vs League)")
-    st.dataframe(defense_baseline.style.format(formatters), width="stretch")
-
-st.markdown("### Offense Trend (EPA/play)")
-if offense_trend.empty:
-    st.info("No offense trend data.")
-else:
-    offense_plot = offense_trend.set_index("display_week")
-    offense_cols = [c for c in ["On EPA/play", "Off EPA/play"] if c in offense_plot.columns]
-    if offense_cols:
-        st.line_chart(offense_plot[offense_cols])
-    else:
-        st.info("No offense On/Off EPA series available for current filters.")
-    st.dataframe(offense_trend, width="stretch")
-
-st.markdown("### Defense Trend (EPA/play)")
-if defense_trend.empty:
-    st.info("No defense trend data.")
-else:
-    defense_plot = defense_trend.set_index("display_week")
-    defense_cols = [c for c in ["On EPA/play", "Off EPA/play"] if c in defense_plot.columns]
-    if defense_cols:
-        st.line_chart(defense_plot[defense_cols])
-    else:
-        st.info("No defense On/Off EPA series available for current filters.")
-    st.dataframe(defense_trend, width="stretch")
-
-st.markdown("### Offense Personnel Splits")
-if offense_personnel.empty:
-    st.info("No offense personnel rows.")
-else:
-    st.dataframe(offense_personnel.style.format(formatters), width="stretch")
-
-st.markdown("### Defense Personnel Splits (Opponent Offensive Personnel)")
-if defense_personnel.empty:
-    st.info("No defense personnel rows.")
-else:
-    st.dataframe(defense_personnel.style.format(formatters), width="stretch")
-
-st.markdown("### Top 50 Offensive Players By Absolute EPA Delta")
-if top_offense.empty:
-    st.info("No offensive leaderboard rows for current filters.")
-else:
-    st.dataframe(top_offense.style.format(formatters), width="stretch")
-
-st.markdown("### Top 50 Defensive Players By Absolute EPA Delta")
-if top_defense.empty:
-    st.info("No defensive leaderboard rows for current filters.")
-else:
-    st.dataframe(top_defense.style.format(formatters), width="stretch")
-
-st.markdown("### Export")
-export_col1, export_col2 = st.columns(2)
-with export_col1:
-    st.download_button("Download Offense On/Off CSV", df_to_csv_bytes(offense_table), file_name="offense_on_off.csv", mime="text/csv")
-    st.download_button("Download Defense On/Off CSV", df_to_csv_bytes(defense_table), file_name="defense_on_off.csv", mime="text/csv")
-    st.download_button("Download Offense Personnel CSV", df_to_csv_bytes(offense_personnel), file_name="offense_personnel_splits.csv", mime="text/csv")
-    st.download_button("Download Defense Personnel CSV", df_to_csv_bytes(defense_personnel), file_name="defense_personnel_splits.csv", mime="text/csv")
-
-with export_col2:
-    selection_text = (
-        f"Team: {selection_payload['team']}\n"
-        f"Players: {', '.join(selection_payload['players'])}\n"
-        f"On definition: {selection_payload['on_definition']}\n"
-        f"Season: {selection_payload['season']}\n"
-        f"Weeks: {selection_payload['weeks']}\n"
-        f"Down: {selection_payload['down']}\n"
-        f"Distance: {selection_payload['distance']}\n"
-        f"Quarter: {selection_payload['quarters']}\n"
-        f"Red Zone: {selection_payload['red_zone']}\n"
-        f"Inside 10: {selection_payload['inside_10']}\n"
-        f"Score margin: {selection_payload['score_margin']}"
-    )
-    if st.button("Generate PDF Report"):
-        pdf_bytes = build_pdf_bytes(
-            selection_text,
-            {
-                "Offense On/Off": offense_table,
-                "Defense On/Off": defense_table,
-                "Offense Baseline (Team vs League)": offense_baseline,
-                "Defense Baseline (Team vs League)": defense_baseline,
-                "Offense Trend Table": offense_trend,
-                "Defense Trend Table": defense_trend,
-                "Offense Personnel Splits": offense_personnel,
-                "Defense Personnel Splits": defense_personnel,
-            },
-            {
-                "Offense Trend Chart": offense_trend,
-                "Defense Trend Chart": defense_trend,
-            },
-        )
-        if pdf_bytes is None:
-            st.info("Install fpdf2 to enable PDF export.")
+with tab_onoff:
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("### Offense On/Off")
+        if offense_table.empty:
+            st.info("No offense rows for this selection.")
         else:
-            st.session_state["pdf_bytes"] = pdf_bytes
+            st.dataframe(offense_table.style.format(formatters), width="stretch")
 
-    if "pdf_bytes" in st.session_state and st.session_state["pdf_bytes"] is not None:
-        st.download_button(
-            "Download PDF Report",
-            data=st.session_state["pdf_bytes"],
-            file_name="on_off_report.pdf",
-            mime="application/pdf",
+        st.markdown("### Offense Baseline (Team vs League)")
+        st.dataframe(offense_baseline.style.format(formatters), width="stretch")
+
+    with col2:
+        st.markdown("### Defense On/Off")
+        if defense_table.empty:
+            st.info("No defense rows for this selection.")
+        else:
+            st.dataframe(defense_table.style.format(formatters), width="stretch")
+
+        st.markdown("### Defense Baseline (Team vs League)")
+        st.dataframe(defense_baseline.style.format(formatters), width="stretch")
+
+    st.markdown("### Offense Trend (EPA/play)")
+    if offense_trend.empty:
+        st.info("No offense trend data.")
+    else:
+        offense_plot = offense_trend.set_index("display_week")
+        offense_cols = [c for c in ["On EPA/play", "Off EPA/play"] if c in offense_plot.columns]
+        if offense_cols:
+            st.line_chart(offense_plot[offense_cols])
+        else:
+            st.info("No offense On/Off EPA series available for current filters.")
+        st.dataframe(offense_trend, width="stretch")
+
+    st.markdown("### Defense Trend (EPA/play)")
+    if defense_trend.empty:
+        st.info("No defense trend data.")
+    else:
+        defense_plot = defense_trend.set_index("display_week")
+        defense_cols = [c for c in ["On EPA/play", "Off EPA/play"] if c in defense_plot.columns]
+        if defense_cols:
+            st.line_chart(defense_plot[defense_cols])
+        else:
+            st.info("No defense On/Off EPA series available for current filters.")
+        st.dataframe(defense_trend, width="stretch")
+
+    st.markdown("### Offense Personnel Splits")
+    if offense_personnel.empty:
+        st.info("No offense personnel rows.")
+    else:
+        st.dataframe(offense_personnel.style.format(formatters), width="stretch")
+
+    st.markdown("### Defense Personnel Splits (Opponent Offensive Personnel)")
+    if defense_personnel.empty:
+        st.info("No defense personnel rows.")
+    else:
+        st.dataframe(defense_personnel.style.format(formatters), width="stretch")
+
+    st.markdown("### Top 50 Offensive Players By Absolute EPA Delta")
+    if top_offense.empty:
+        st.info("No offensive leaderboard rows for current filters.")
+    else:
+        st.dataframe(top_offense.style.format(formatters), width="stretch")
+
+    st.markdown("### Top 50 Defensive Players By Absolute EPA Delta")
+    if top_defense.empty:
+        st.info("No defensive leaderboard rows for current filters.")
+    else:
+        st.dataframe(top_defense.style.format(formatters), width="stretch")
+
+    st.markdown("### Export")
+    export_col1, export_col2 = st.columns(2)
+    with export_col1:
+        st.download_button("Download Offense On/Off CSV", df_to_csv_bytes(offense_table), file_name="offense_on_off.csv", mime="text/csv")
+        st.download_button("Download Defense On/Off CSV", df_to_csv_bytes(defense_table), file_name="defense_on_off.csv", mime="text/csv")
+        st.download_button("Download Offense Personnel CSV", df_to_csv_bytes(offense_personnel), file_name="offense_personnel_splits.csv", mime="text/csv")
+        st.download_button("Download Defense Personnel CSV", df_to_csv_bytes(defense_personnel), file_name="defense_personnel_splits.csv", mime="text/csv")
+
+    with export_col2:
+        selection_text = (
+            f"Team: {selection_payload['team']}\n"
+            f"Players: {', '.join(selection_payload['players'])}\n"
+            f"On definition: {selection_payload['on_definition']}\n"
+            f"Season: {selection_payload['season']}\n"
+            f"Weeks: {selection_payload['weeks']}\n"
+            f"Down: {selection_payload['down']}\n"
+            f"Distance: {selection_payload['distance']}\n"
+            f"Quarter: {selection_payload['quarters']}\n"
+            f"Red Zone: {selection_payload['red_zone']}\n"
+            f"Inside 10: {selection_payload['inside_10']}\n"
+            f"Score margin: {selection_payload['score_margin']}"
         )
+        if st.button("Generate PDF Report"):
+            pdf_bytes = build_pdf_bytes(
+                selection_text,
+                {
+                    "Offense On/Off": offense_table,
+                    "Defense On/Off": defense_table,
+                    "Offense Baseline (Team vs League)": offense_baseline,
+                    "Defense Baseline (Team vs League)": defense_baseline,
+                    "Offense Trend Table": offense_trend,
+                    "Defense Trend Table": defense_trend,
+                    "Offense Personnel Splits": offense_personnel,
+                    "Defense Personnel Splits": defense_personnel,
+                },
+                {
+                    "Offense Trend Chart": offense_trend,
+                    "Defense Trend Chart": defense_trend,
+                },
+            )
+            if pdf_bytes is None:
+                st.info("Install fpdf2 to enable PDF export.")
+            else:
+                st.session_state["pdf_bytes"] = pdf_bytes
 
-with st.expander("Selection", expanded=False):
-    st.write(selection_payload)
+        if "pdf_bytes" in st.session_state and st.session_state["pdf_bytes"] is not None:
+            st.download_button(
+                "Download PDF Report",
+                data=st.session_state["pdf_bytes"],
+                file_name="on_off_report.pdf",
+                mime="application/pdf",
+            )
 
-tab_onoff_hint, tab_status = st.tabs(["On/Off View", "Active/Inactive Splits"])
-with tab_onoff_hint:
-    st.info("Use the sections above for standard on/off analysis.")
+    with st.expander("Selection", expanded=False):
+        st.write(selection_payload)
 
 with tab_status:
     st.markdown("### Snap-Threshold Team + Player Splits")
