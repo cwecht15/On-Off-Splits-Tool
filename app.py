@@ -103,6 +103,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         "sack",
         "scramble",
         "rec_yards",
+        "reception",
         "passing_touchdown",
         "rush_attempt",
         "rushing_touchdown",
@@ -184,6 +185,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         "sack",
         "scramble",
         "rec_yards",
+        "reception",
         "passing_touchdown",
         "rush_attempt",
         "rushing_touchdown",
@@ -779,7 +781,13 @@ def team_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataFra
     return out[["Status", "Games", "Plays", "Plays/Game", "EPA/play", "Success Rate", "Pass Rate", "Run Rate"]]
 
 
-def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataFrame, player_id: str, position: str) -> pd.DataFrame:
+def player_active_inactive_table(
+    team_plays: pd.DataFrame,
+    games_split: pd.DataFrame,
+    player_id: str,
+    position: str,
+    reception_points: float,
+) -> pd.DataFrame:
     df = team_plays.merge(games_split, on="gameId", how="inner")
     if df.empty:
         return pd.DataFrame()
@@ -797,6 +805,7 @@ def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataF
         ((df["receiver_id_norm"] == player_id) | (df["target_id"] == player_id)) & (df["is_target_event"] == 1)
     ).astype(int)
     df["player_rec_yards"] = np.where(df["receiver_id_norm"] == player_id, df["rec_yards"].fillna(0), 0.0)
+    df["player_receptions"] = np.where((df["receiver_id_norm"] == player_id) & (df["reception"] == 1), 1, 0)
     df["player_rec_td"] = np.where((df["receiver_id_norm"] == player_id) & (df["passing_touchdown"] == 1), 1, 0)
     df["player_rush_att"] = np.where((df["runner_id_norm"] == player_id) & (df["rush_attempt"] == 1), 1, 0)
     df["player_designed_rush_att"] = np.where(
@@ -824,6 +833,7 @@ def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataF
         games = int(g["gameId"].nunique())
         targets = float(g["player_target"].sum())
         rec_yards = float(g["player_rec_yards"].sum())
+        receptions = float(g["player_receptions"].sum())
         rec_tds = float(g["player_rec_td"].sum())
         rush_att = float(g["player_rush_att"].sum())
         designed_rush_att = float(g["player_designed_rush_att"].sum())
@@ -843,6 +853,15 @@ def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataF
         team_rec_td = float(g["team_rec_td"].sum())
 
         base = {"Status": split_val, "Games": games}
+        fantasy_pts = (
+            pass_yards * 0.04
+            + pass_tds * 4.0
+            + rec_yards * 0.1
+            + rush_yards * 0.1
+            + (rec_tds + rush_tds) * 6.0
+            + receptions * float(reception_points)
+        )
+        base["Fantasy Pts/Game"] = safe_div_scalar(fantasy_pts, games)
         if pos.startswith("QB"):
             base.update(
                 {
@@ -882,7 +901,11 @@ def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataF
             )
         rows.append(base)
 
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    ordered_cols = ["Status", "Fantasy Pts/Game"] + [c for c in out.columns if c not in ["Status", "Fantasy Pts/Game"]]
+    return out[ordered_cols]
 
 
 def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
@@ -1243,6 +1266,7 @@ formatters = {
     "Rushing TD Share": "{:.1%}",
     "Receiving TD/Game": "{:.2f}",
     "Receiving TD Share": "{:.1%}",
+    "Fantasy Pts/Game": "{:.2f}",
 }
 
 tab_onoff, tab_status = st.tabs(["On/Off View", "Snap-Threshold Splits"])
@@ -1379,7 +1403,7 @@ with tab_status:
     if not status_team_options:
         st.info("No teams available for current season/week filters.")
     else:
-        col_a, col_b, col_c, col_d = st.columns(4)
+        col_a, col_b, col_c, col_d, col_e = st.columns(5)
         with col_a:
             status_team = st.selectbox("Status Split Team", status_team_options, key="status_team")
 
@@ -1425,6 +1449,13 @@ with tab_status:
                     step=1,
                     key="status_snap_threshold",
                 )
+            with col_e:
+                scoring_choice = st.selectbox(
+                    "Fantasy Scoring",
+                    ["PPR (1.0)", "Half PPR (0.5)"],
+                    key="status_scoring",
+                )
+                reception_points = 1.0 if scoring_choice.startswith("PPR") else 0.5
             second_player_row = status_roster[status_roster["label"] == second_player_label].iloc[0]
             second_player_id = str(second_player_row["player_id"])
             second_player_pos = str(normalize_position(pd.Series([second_player_row["position"]])).iloc[0])
@@ -1441,7 +1472,13 @@ with tab_status:
                     int(min_snap_threshold),
                 )
                 team_status_table = team_active_inactive_table(status_team_plays, games_split)
-                player_status_table = player_active_inactive_table(status_team_plays, games_split, second_player_id, second_player_pos)
+                player_status_table = player_active_inactive_table(
+                    status_team_plays,
+                    games_split,
+                    second_player_id,
+                    second_player_pos,
+                    reception_points,
+                )
 
                 st.markdown("#### Team Results (Split By Selected Player Snaps)")
                 if team_status_table.empty:
