@@ -1620,7 +1620,7 @@ selected_labels = st.sidebar.multiselect("Players", player_label_options, key=pl
 selected_labels = [lbl for lbl in selected_labels if isinstance(lbl, str) and lbl in valid_player_labels]
 if not selected_labels and player_label_options:
     st.session_state[player_select_key] = [player_label_options[0]]
-    st.rerun()
+    selected_labels = [player_label_options[0]]
 if not selected_labels:
     st.warning("No valid player options for this team/season selection.")
     st.stop()
