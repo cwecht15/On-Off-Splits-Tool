@@ -456,6 +456,10 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             memory_map=True,
         )
 
+    epa["gameId"] = normalize_str(epa["gameId"].astype("string"))
+    epa["playId"] = normalize_str(epa["playId"].astype("string"))
+    epa["epa"] = pd.to_numeric(epa["epa"], errors="coerce")
+
     num_cols = [
         "offense_score",
         "defense_score",
