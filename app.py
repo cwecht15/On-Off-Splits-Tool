@@ -18,7 +18,17 @@ try:
 except Exception:  # pragma: no cover
     FPDF = None
 
-st.set_page_config(page_title="NFL On/Off Splits", layout="wide")
+APP_MODE = os.environ.get("APP_MODE", "on_off").strip().lower()
+if APP_MODE not in {"on_off", "snap_threshold", "leaderboard"}:
+    APP_MODE = "on_off"
+ENABLE_POSTGRES = os.environ.get("ENABLE_POSTGRES", "0").strip() == "1"
+
+PAGE_TITLES = {
+    "on_off": "NFL On/Off Splits",
+    "snap_threshold": "NFL Snap-Threshold Splits",
+    "leaderboard": "NFL On/Off Leaderboard",
+}
+st.set_page_config(page_title=PAGE_TITLES.get(APP_MODE, "NFL Tool"), layout="wide")
 
 DATA_DIR = Path(__file__).resolve().parent
 DATA_CACHE_DIR = Path.home() / ".cache" / "on_off_tool_data"
@@ -106,6 +116,9 @@ def _extract_columns(
 
 
 def get_postgres_config() -> dict[str, str] | None:
+    if not ENABLE_POSTGRES:
+        return None
+
     dsn = os.environ.get("POSTGRES_DSN", "").strip()
 
     try:
@@ -1449,6 +1462,106 @@ if selected_weeks:
 # Leaderboards intentionally use only season/week filters.
 leaderboard_plays = base_filtered.copy()
 
+if APP_MODE == "leaderboard":
+    leaderboard_min_plays = st.sidebar.number_input("Leaderboard min plays (On and Off)", min_value=1, value=100, step=10)
+    leaderboard_team_options = sorted(
+        set(leaderboard_plays["offense"].dropna().astype(str).unique()) | set(leaderboard_plays["defense"].dropna().astype(str).unique())
+    )
+    leaderboard_team_choice = st.sidebar.selectbox("Leaderboard team", ["All teams"] + leaderboard_team_options)
+    leaderboard_team_filter = None if leaderboard_team_choice == "All teams" else leaderboard_team_choice
+
+    top_offense = top_player_diffs(
+        plays=leaderboard_plays,
+        part_wide=part_filtered,
+        rosters=roster_filtered,
+        role="offense",
+        min_plays=int(leaderboard_min_plays),
+        leaderboard_team=leaderboard_team_filter,
+        top_n=50,
+    )
+    top_defense = top_player_diffs(
+        plays=leaderboard_plays,
+        part_wide=part_filtered,
+        rosters=roster_filtered,
+        role="defense",
+        min_plays=int(leaderboard_min_plays),
+        leaderboard_team=leaderboard_team_filter,
+        top_n=50,
+    )
+
+    st.markdown("### Top 50 Offensive Players By Absolute EPA Delta")
+    st.dataframe(top_offense, width="stretch")
+    st.markdown("### Top 50 Defensive Players By Absolute EPA Delta")
+    st.dataframe(top_defense, width="stretch")
+    st.stop()
+
+if APP_MODE == "snap_threshold":
+    status_team_options = sorted([str(x) for x in roster_filtered["team"].dropna().astype(str).unique() if str(x)])
+    if not status_team_options:
+        st.info("No teams available for current season/week filters.")
+        st.stop()
+
+    col_a, col_b, col_c, col_d, col_e = st.columns(5)
+    with col_a:
+        status_team = st.selectbox("Status Split Team", status_team_options, key="status_team")
+
+    status_roster = roster_filtered[roster_filtered["team"] == status_team].copy()
+    pref_first = normalize_str(status_roster["FootballName"])
+    fb_first = normalize_str(status_roster["FirstName"])
+    ln = normalize_str(status_roster["LastName"])
+    fn = pref_first.where(pref_first.str.len() > 0, fb_first)
+    fulln = (fn + " " + ln).str.strip().where((fn + " " + ln).str.strip().str.len() > 0, fn)
+    status_roster["display_name"] = fulln
+    status_roster["label"] = (
+        status_roster["display_name"].fillna("Unknown")
+        + " ("
+        + status_roster["player_id"].astype(str)
+        + ") - "
+        + normalize_position(status_roster["position"]).astype(str)
+    )
+    status_roster = status_roster.dropna(subset=["player_id"]).drop_duplicates(subset=["player_id"]).reset_index(drop=True)
+    if status_roster.empty:
+        st.info("No roster rows available for this team and filter.")
+        st.stop()
+
+    with col_b:
+        split_player_label = st.selectbox("Player For Status Split", status_roster["label"].tolist(), key="status_split_player")
+    split_player_row = status_roster[status_roster["label"] == split_player_label].iloc[0]
+    split_player_id = str(split_player_row["player_id"])
+
+    with col_c:
+        second_player_label = st.selectbox("Second Player For Player Stats", status_roster["label"].tolist(), key="status_second_player")
+    with col_d:
+        min_snap_threshold = st.number_input("Low-snap threshold (< snaps)", min_value=0, value=1, step=1, key="status_snap_threshold")
+    with col_e:
+        scoring_choice = st.selectbox("Fantasy Scoring", ["PPR (1.0)", "Half PPR (0.5)"], key="status_scoring")
+        reception_points = 1.0 if scoring_choice.startswith("PPR") else 0.5
+    second_player_row = status_roster[status_roster["label"] == second_player_label].iloc[0]
+    second_player_id = str(second_player_row["player_id"])
+    second_player_pos = str(normalize_position(pd.Series([second_player_row["position"]])).iloc[0])
+
+    status_team_plays = leaderboard_plays[leaderboard_plays["offense"] == status_team].copy()
+    if status_team_plays.empty:
+        st.info("No team offensive plays for selected season/week.")
+        st.stop()
+
+    games_split = game_status_split(status_team_plays, part_filtered, status_team, split_player_id, int(min_snap_threshold))
+    team_status_table = team_active_inactive_table(status_team_plays, games_split)
+    player_status_table = player_active_inactive_table(
+        status_team_plays,
+        games_split,
+        second_player_id,
+        second_player_pos,
+        reception_points,
+    )
+
+    st.markdown("#### Team Results (Split By Selected Player Snaps)")
+    st.dataframe(team_status_table, width="stretch")
+    st.markdown("#### Player Results (Second Player)")
+    st.caption(f"Second player position profile: {second_player_pos}")
+    st.dataframe(player_status_table, width="stretch")
+    st.stop()
+
 team_options = sorted([str(x) for x in roster_filtered["team"].dropna().unique() if str(x)])
 if not team_options:
     team_options = sorted(set(base_filtered["offense"].astype(str).unique()) | set(base_filtered["defense"].astype(str).unique()))
@@ -1557,12 +1670,6 @@ margin_max = int(np.ceil(np.nanmax(team_margin_series)))
 score_margin_range = st.sidebar.slider("Score margin (team perspective)", min_value=margin_min, max_value=margin_max, value=(margin_min, margin_max))
 
 min_play_threshold = st.sidebar.number_input("Minimum plays (On and Off)", min_value=0, value=0, step=10)
-leaderboard_min_plays = st.sidebar.number_input("Leaderboard min plays (On and Off)", min_value=1, value=100, step=10)
-leaderboard_team_options = sorted(
-    set(leaderboard_plays["offense"].dropna().astype(str).unique()) | set(leaderboard_plays["defense"].dropna().astype(str).unique())
-)
-leaderboard_team_choice = st.sidebar.selectbox("Leaderboard team", ["All teams"] + leaderboard_team_options)
-leaderboard_team_filter = None if leaderboard_team_choice == "All teams" else leaderboard_team_choice
 
 base_filtered = apply_common_filters(
     base_filtered,
@@ -1654,24 +1761,8 @@ defense_trend = trend_table(
     on_keys=defense_on_keys,
     team_plays_override=defense_tagged_plays,
 )
-top_offense = top_player_diffs(
-    plays=leaderboard_plays,
-    part_wide=part_filtered,
-    rosters=roster_filtered,
-    role="offense",
-    min_plays=int(leaderboard_min_plays),
-    leaderboard_team=leaderboard_team_filter,
-    top_n=50,
-)
-top_defense = top_player_diffs(
-    plays=leaderboard_plays,
-    part_wide=part_filtered,
-    rosters=roster_filtered,
-    role="defense",
-    min_plays=int(leaderboard_min_plays),
-    leaderboard_team=leaderboard_team_filter,
-    top_n=50,
-)
+top_offense = pd.DataFrame()
+top_defense = pd.DataFrame()
 
 formatters = {
     "EPA/play": "{:.3f}",
@@ -1712,7 +1803,7 @@ formatters = {
     "Fantasy Pts/Game": "{:.2f}",
 }
 
-tab_onoff, tab_status = st.tabs(["On/Off View", "Snap-Threshold Splits"])
+tab_onoff = st.container()
 
 with tab_onoff:
     col1, col2 = st.columns(2)
@@ -1772,18 +1863,6 @@ with tab_onoff:
     else:
         st.dataframe(defense_personnel.style.format(formatters), width="stretch")
 
-    st.markdown("### Top 50 Offensive Players By Absolute EPA Delta")
-    if top_offense.empty:
-        st.info("No offensive leaderboard rows for current filters.")
-    else:
-        st.dataframe(top_offense.style.format(formatters), width="stretch")
-
-    st.markdown("### Top 50 Defensive Players By Absolute EPA Delta")
-    if top_defense.empty:
-        st.info("No defensive leaderboard rows for current filters.")
-    else:
-        st.dataframe(top_defense.style.format(formatters), width="stretch")
-
     st.markdown("### Export")
     export_col1, export_col2 = st.columns(2)
     with export_col1:
@@ -1840,7 +1919,7 @@ with tab_onoff:
     with st.expander("Selection", expanded=False):
         st.write(selection_payload)
 
-with tab_status:
+if False:
     st.markdown("### Snap-Threshold Team + Player Splits")
     status_team_options = sorted([str(x) for x in roster_filtered["team"].dropna().astype(str).unique() if str(x)])
     if not status_team_options:
