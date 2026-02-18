@@ -1,5 +1,7 @@
 # Metrics And Data Logic
 
+This document describes the core on/off metric logic used by `app_on_off.py` (and shared helpers in `app_multi.py`).
+
 ## Join Keys
 
 - Base play join: `play_by_play_data.csv` + `epa.csv` on `gameId` + `playId`

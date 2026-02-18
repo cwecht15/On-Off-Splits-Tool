@@ -38,6 +38,12 @@ Run full suite:
 python -m unittest tests\test_data_correctness.py tests\test_golden_regression.py tests\test_golden_regression_defense.py -v
 ```
 
+Optional smoke check for deploy entrypoints:
+
+```powershell
+python -m py_compile app_on_off.py app_snap_threshold.py app_leaderboard.py app_multi.py
+```
+
 Run only one file:
 
 ```powershell

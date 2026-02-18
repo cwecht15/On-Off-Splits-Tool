@@ -2,9 +2,14 @@
 
 ## Purpose
 
-This app shows team-level on/off splits for selected player(s), for both offense and defense.
+This repo now exposes three separate Streamlit apps:
+- `app_on_off.py`: team-level on/off splits for selected player(s)
+- `app_snap_threshold.py`: snap-threshold split workflow
+- `app_leaderboard.py`: top-50 on/off delta leaderboard
 
-Use cases:
+The workflow below describes `app_on_off.py`.
+
+Use cases for `app_on_off.py`:
 - quantify impact when a player (or group of players) is on field vs off field
 - compare offense and defense effects side-by-side
 - inspect weekly trend behavior

@@ -1,3 +1,12 @@
+"""Standalone On/Off Streamlit app.
+
+This module powers the core workflow:
+1) load normalized play/participation/roster data,
+2) apply sidebar filters,
+3) compute offense/defense on-off summaries,
+4) render tables, trend charts, and exports.
+"""
+
 import io
 import os
 import tempfile
@@ -46,6 +55,7 @@ def _data_url_key(filename: str) -> str:
 
 
 def get_data_url_map() -> dict[str, str]:
+    """Resolve CSV download locations from secrets/env configuration."""
     url_map: dict[str, str] = {}
 
     try:
@@ -71,6 +81,7 @@ def get_data_url_map() -> dict[str, str]:
 
 
 def ensure_data_file(filename: str) -> Path:
+    """Return local file path for required CSV, downloading/caching when needed."""
     local_path = DATA_DIR / filename
     if local_path.exists():
         return local_path
@@ -104,6 +115,7 @@ def ensure_data_file(filename: str) -> Path:
 
 @st.cache_data(show_spinner=False)
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load and normalize base dataframes used by all on/off calculations."""
     part_path = ensure_data_file("participation.csv")
     pbp_path = ensure_data_file("play_by_play_data.csv")
     epa_path = ensure_data_file("epa.csv")
@@ -307,6 +319,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 
 def build_success_flag(df: pd.DataFrame) -> pd.Series:
+    """Compute success flag using 40/60/100 down-distance thresholds."""
     down = pd.to_numeric(df["down"], errors="coerce")
     distance = pd.to_numeric(df["distance"], errors="coerce")
     gain = pd.to_numeric(df["yards_gained"], errors="coerce").fillna(0)
@@ -413,6 +426,7 @@ def get_on_keys(
     selected_player_ids: list[str],
     on_mode: str,
 ) -> pd.DataFrame:
+    """Build play keys where selected player condition is true for team/role."""
     if not selected_player_ids:
         return pd.DataFrame(columns=["gameId", "playId", "is_on"])
 
@@ -450,6 +464,7 @@ def split_for_role(
     on_mode: str,
     margin_range: tuple[int, int],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Compute split summary and personnel table for offense or defense."""
     if role == "offense":
         team_plays = plays[plays["offense"] == team]
     else:
@@ -498,6 +513,7 @@ def baseline_table(
     role: str,
     margin_range: tuple[int, int],
 ) -> pd.DataFrame:
+    """Return Team vs League baseline metrics under current role/filter context."""
     if role == "offense":
         team_df = plays[plays["offense"] == team]
         league_df = plays
@@ -525,6 +541,7 @@ def trend_table(
     on_mode: str,
     margin_range: tuple[int, int],
 ) -> pd.DataFrame:
+    """Return weekly On/Off EPA and play-count trend table."""
     if role == "offense":
         team_plays = plays[plays["offense"] == team]
     else:
@@ -625,6 +642,7 @@ def build_pdf_bytes(
     tables: dict[str, pd.DataFrame],
     trend_charts: dict[str, pd.DataFrame],
 ) -> bytes | None:
+    """Generate report PDF bytes from selected tables and trend charts."""
     if FPDF is None:
         return None
 
@@ -686,6 +704,7 @@ plays, part_wide, rosters = load_data()
 st.title("NFL Player On/Off Splits")
 st.caption("Weeks 1-18 are regular season and 19-22 are playoffs. Excludes no-play, spikes, kneels, 2PT attempts, and special teams plays.")
 
+# Global time filters are applied before team/player filters.
 all_seasons = sorted([int(x) for x in plays["season"].dropna().unique()])
 selected_seasons = st.sidebar.multiselect("Seasons", all_seasons, default=all_seasons)
 
@@ -716,6 +735,7 @@ if not team_options:
 
 team = st.sidebar.selectbox("Team", team_options)
 
+# Build team-scoped player choices from weekly rosters for current filters.
 player_df = roster_filtered[roster_filtered["team"] == team].copy()
 if player_df.empty:
     st.warning("No players found for selected team and filters.")
@@ -763,6 +783,7 @@ selected_player_ids = (
     player_options[player_options["label"].isin(selected_labels)]["player_id"].drop_duplicates().tolist()
 )
 
+# Situation filters use the combined team play scope (offense + defense).
 team_scope = base_filtered[(base_filtered["offense"] == team) | (base_filtered["defense"] == team)]
 if team_scope.empty:
     st.warning("No plays for selected team and season/week filters.")
@@ -819,6 +840,7 @@ selection_payload = {
     "score_margin": score_margin_range,
 }
 
+# Core outputs for offense and defense views.
 offense_table, offense_personnel = split_for_role(
     plays=base_filtered,
     part_wide=part_filtered,

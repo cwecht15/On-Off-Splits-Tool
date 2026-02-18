@@ -1,6 +1,11 @@
 # NFL On/Off Splits Tool
 
-Internal Streamlit dashboard for NFL player on/off splits with offense and defense views, trend charts, personnel splits, and export.
+Internal Streamlit dashboards for NFL player/team split analysis.
+
+The repo now supports three deployable app entrypoints:
+- `app_on_off.py` (core offense/defense on-off workflow)
+- `app_snap_threshold.py` (snap-threshold split workflow)
+- `app_leaderboard.py` (top-50 leaderboard workflow)
 
 ## Quick Start
 
@@ -8,38 +13,19 @@ Internal Streamlit dashboard for NFL player on/off splits with offense and defen
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python -m streamlit run app.py
+python -m streamlit run app_on_off.py
 ```
 
-## Data Setup
-
-Data source priority:
-
-1. Postgres (if configured)
-2. External CSV URLs/local files fallback
-
-### Postgres (recommended)
-
-Set `[postgres]` secrets (see `.streamlit/secrets.example.toml`):
-
-- `dsn`
-- optional table overrides:
-  - `participation_table`
-  - `play_by_play_data_table`
-  - `epa_table`
-  - `weekly_rosters_table`
-  - `pp_data_table`
-
-Before deploying on Postgres, load typed tables:
+Run other app variants locally:
 
 ```powershell
-$env:POSTGRES_DSN = "postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
-python scripts/load_postgres_typed.py --csv-dir .
+python -m streamlit run app_snap_threshold.py
+python -m streamlit run app_leaderboard.py
 ```
 
-### CSV URL fallback
+## Data Setup (Current Recommended)
 
-If Postgres is not configured, the app requires external CSV URLs (CSV files are not committed to git):
+Use URL-based CSV hosting (for example S3 object URLs):
 
 - `participation.csv`
 - `play_by_play_data.csv`
@@ -47,7 +33,7 @@ If Postgres is not configured, the app requires external CSV URLs (CSV files are
 - `weekly_rosters.csv`
 - `pp_data.csv`
 
-Set these in Streamlit Cloud secrets under `[data_urls]` (see `docs/DEPLOYMENT_STREAMLIT_CLOUD.md`), or via env vars like `DATA_URL_PARTICIPATION_CSV`, or use `DATA_BASE_URL`.
+Set these in Streamlit Cloud secrets under `[data_urls]` (see `docs/DEPLOYMENT_STREAMLIT_CLOUD.md`).
 
 ## Documentation
 
@@ -58,7 +44,11 @@ Set these in Streamlit Cloud secrets under `[data_urls]` (see `docs/DEPLOYMENT_S
 
 ## Core Files
 
-- App: `app.py`
+- On/Off app: `app_on_off.py`
+- Snap-threshold app: `app_snap_threshold.py`
+- Leaderboard app: `app_leaderboard.py`
+- Shared multi-feature module: `app_multi.py`
+- Legacy combined app file: `app.py`
 - Requirements: `requirements.txt`
 - Streamlit config: `.streamlit/config.toml`
 - Runtime pin: `runtime.txt`

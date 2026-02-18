@@ -1,3 +1,12 @@
+"""Multi-feature Streamlit module used by split entrypoints.
+
+Entry files set APP_MODE before importing this module:
+- app_snap_threshold.py -> APP_MODE=snap_threshold
+- app_leaderboard.py -> APP_MODE=leaderboard
+
+The module still contains shared helpers for loading, filtering, and reporting.
+"""
+
 import io
 import os
 import re
@@ -116,6 +125,7 @@ def _extract_columns(
 
 
 def get_postgres_config() -> dict[str, str] | None:
+    """Return Postgres table configuration when DB mode is explicitly enabled."""
     if not ENABLE_POSTGRES:
         return None
 
@@ -316,6 +326,7 @@ def ensure_data_file(filename: str) -> Path:
 
 @st.cache_data(show_spinner=False)
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load normalized app dataframes from Postgres or URL/local CSV sources."""
     pg_cfg = get_postgres_config()
     if pg_cfg:
         participation, pbp, epa, rosters, pp = load_raw_data_from_postgres(pg_cfg)
@@ -1463,6 +1474,7 @@ if selected_weeks:
 leaderboard_plays = base_filtered.copy()
 
 if APP_MODE == "leaderboard":
+    # Leaderboard mode: only compute and render top-50 tables.
     leaderboard_min_plays = st.sidebar.number_input("Leaderboard min plays (On and Off)", min_value=1, value=100, step=10)
     leaderboard_team_options = sorted(
         set(leaderboard_plays["offense"].dropna().astype(str).unique()) | set(leaderboard_plays["defense"].dropna().astype(str).unique())
@@ -1496,6 +1508,7 @@ if APP_MODE == "leaderboard":
     st.stop()
 
 if APP_MODE == "snap_threshold":
+    # Snap-threshold mode: only compute active/inactive-style game split outputs.
     status_team_options = sorted([str(x) for x in roster_filtered["team"].dropna().astype(str).unique() if str(x)])
     if not status_team_options:
         st.info("No teams available for current season/week filters.")

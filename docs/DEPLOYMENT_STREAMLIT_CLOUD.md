@@ -19,43 +19,15 @@ git push -u origin main
 ```
 
 Important: CSV data files are intentionally not tracked in git.
-The app uses Postgres when configured, otherwise it downloads required files from URLs you provide in secrets/environment.
+Apps download required CSV files from URLs provided in secrets/environment.
 
-## Postgres Configuration (Recommended)
+## Deploy Three Separate Apps
 
-In Streamlit Cloud app settings, add secrets:
+Create three Streamlit apps pointing to the same repo/branch, each with a different main file:
 
-```toml
-[postgres]
-dsn = "postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
-participation_table = "participation"
-play_by_play_data_table = "play_by_play_data"
-epa_table = "epa"
-weekly_rosters_table = "weekly_rosters"
-pp_data_table = "pp_data"
-```
-
-Notes:
-
-- `dsn` can also be set as env var `POSTGRES_DSN`.
-- Table names are optional if you use defaults above.
-- Per-table env vars are also supported (`POSTGRES_TABLE_PARTICIPATION`, etc.).
-
-## Postgres Data Load (Typed, Recommended)
-
-Use the typed loader script to avoid text-type issues in app metrics.
-
-```powershell
-$env:POSTGRES_DSN = "postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
-python scripts/load_postgres_typed.py --csv-dir .
-```
-
-This script:
-
-- Drops and recreates all five required tables with explicit numeric/text types
-- Loads CSVs via streaming COPY
-- Creates indexes used by app filters/joins
-- Runs `ANALYZE` for better query planning
+1. `app_on_off.py`
+2. `app_snap_threshold.py`
+3. `app_leaderboard.py`
 
 ## Data Source Configuration
 
@@ -66,12 +38,6 @@ Required files:
 - `epa.csv`
 - `weekly_rosters.csv`
 - `pp_data.csv`
-
-Configure one of these options when Postgres is not set:
-
-1. Streamlit secrets (recommended)
-2. Per-file env vars (`DATA_URL_PARTICIPATION_CSV`, etc.)
-3. Base URL env var (`DATA_BASE_URL`) that serves all required filenames
 
 Example `.streamlit/secrets.toml`:
 
@@ -84,19 +50,26 @@ weekly_rosters.csv = "https://<your-storage>/weekly_rosters.csv"
 pp_data.csv = "https://<your-storage>/pp_data.csv"
 ```
 
+Important:
+- Each Streamlit app has its own secrets store.
+- Paste the same `[data_urls]` block into all deployed app instances.
+
 ## Deploy Steps
 
 1. Open `https://share.streamlit.io`
 2. Click `Create app`
 3. Select repo and branch `main`
-4. Set main file path to `app.py`
+4. Set main file path to one of:
+   - `app_on_off.py`
+   - `app_snap_threshold.py`
+   - `app_leaderboard.py`
 5. Deploy
 
 ## Sharing
 
 - Keep repo private if data is sensitive.
 - Use Streamlit app sharing controls to add users.
-- Send team the app URL.
+- Send team the relevant app URL(s).
 
 ## Config Used In This Project
 
@@ -128,6 +101,10 @@ App still using stale packages:
 Git LFS budget / clone failures:
 - Remove tracked CSVs from git and keep them in external storage.
 - Confirm Streamlit secrets include valid URLs for all required files.
+
+`Missing required data file ...`
+- Cause: missing/incomplete `[data_urls]` block in this specific app instance.
+- Fix: set all five file URLs in secrets, then clear cache and reboot.
 
 ## Update Workflow
 
