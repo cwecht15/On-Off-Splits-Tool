@@ -765,10 +765,18 @@ def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataF
     df["receiver_id_norm"] = df["receiver_id"]
     df["passer_id_norm"] = df["passer_id"]
     df["runner_id_norm"] = df["runner_id"]
-    df["player_target"] = ((df["target_id"] == player_id) | ((df["target_id"] == "") & (df["receiver_id_norm"] == player_id))).astype(int)
+    # Primary target signal comes from target column; fallback to receiver_id when target is blank.
+    df["player_target"] = (
+        (df["target_id"] == player_id) | ((df["target_id"] == "") & (df["receiver_id_norm"] == player_id))
+    ).astype(int)
     df["player_rec_yards"] = np.where(df["receiver_id_norm"] == player_id, df["rec_yards"].fillna(0), 0.0)
     df["player_rec_td"] = np.where((df["receiver_id_norm"] == player_id) & (df["passing_touchdown"] == 1), 1, 0)
     df["player_rush_att"] = np.where((df["runner_id_norm"] == player_id) & (df["rush_attempt"] == 1), 1, 0)
+    df["player_designed_rush_att"] = np.where(
+        (df["runner_id_norm"] == player_id) & (df["rush_attempt"] == 1) & (df["scramble"] != 1),
+        1,
+        0,
+    )
     df["player_rush_yards"] = np.where(df["runner_id_norm"] == player_id, df["rushing_yards"].fillna(0), 0.0)
     df["player_rush_td"] = np.where((df["runner_id_norm"] == player_id) & (df["rushing_touchdown"] == 1), 1, 0)
     df["player_pass_att"] = np.where((df["passer_id_norm"] == player_id) & (df["attempt"] == 1), 1, 0)
@@ -777,9 +785,10 @@ def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataF
     df["player_dropback"] = np.where((df["passer_id_norm"] == player_id) & (df["dropback"] == 1), 1, 0)
     df["player_sack"] = np.where((df["passer_id_norm"] == player_id) & (df["sack"] == 1), 1, 0)
     df["player_scramble"] = np.where((df["passer_id_norm"] == player_id) & (df["scramble"] == 1), 1, 0)
-    df["team_targets"] = (df["attempt"] == 1).astype(int)
+    df["team_targets"] = (df["target_id"] != "").astype(int)
     df["team_rec_yards"] = df["rec_yards"].fillna(0)
     df["team_rush_att"] = (df["rush_attempt"] == 1).astype(int)
+    df["team_designed_rush_att"] = ((df["rush_attempt"] == 1) & (df["scramble"] != 1)).astype(int)
     df["team_rush_td"] = (df["rushing_touchdown"] == 1).astype(int)
     df["team_rec_td"] = (df["passing_touchdown"] == 1).astype(int)
 
@@ -790,6 +799,7 @@ def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataF
         rec_yards = float(g["player_rec_yards"].sum())
         rec_tds = float(g["player_rec_td"].sum())
         rush_att = float(g["player_rush_att"].sum())
+        designed_rush_att = float(g["player_designed_rush_att"].sum())
         rush_yards = float(g["player_rush_yards"].sum())
         rush_tds = float(g["player_rush_td"].sum())
         pass_att = float(g["player_pass_att"].sum())
@@ -801,6 +811,7 @@ def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataF
         team_targets = float(g["team_targets"].sum())
         team_rec_yards = float(g["team_rec_yards"].sum())
         team_rush_att = float(g["team_rush_att"].sum())
+        team_designed_rush_att = float(g["team_designed_rush_att"].sum())
         team_rush_td = float(g["team_rush_td"].sum())
         team_rec_td = float(g["team_rec_td"].sum())
 
@@ -825,7 +836,7 @@ def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataF
                     "Yards/Target": safe_div_scalar(rec_yards, targets),
                     "Receiving Yardage Share": safe_div_scalar(rec_yards, team_rec_yards),
                     "Rushing Carries/Game": safe_div_scalar(rush_att, games),
-                    "Rushing Carry Share": safe_div_scalar(rush_att, team_rush_att),
+                    "Rushing Carry Share": safe_div_scalar(designed_rush_att, team_designed_rush_att),
                     "Yards/Carry": safe_div_scalar(rush_yards, rush_att),
                     "Rushing TD/Carry": safe_div_scalar(rush_tds, rush_att),
                     "Rushing TD Share": safe_div_scalar(rush_tds, team_rush_td),
