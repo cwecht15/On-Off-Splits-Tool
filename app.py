@@ -82,6 +82,11 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         "target",
         "receiver_id",
         "runner_id",
+        "no_rush_player_id",
+        "no_reception_player_1_id",
+        "no_reception_player_2_id",
+        "fumble_lost_player_1_id",
+        "fumble_lost_player_2_id",
         "offense_score",
         "defense_score",
         "quarter",
@@ -104,9 +109,16 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         "scramble",
         "rec_yards",
         "reception",
+        "intercepted",
         "passing_touchdown",
         "rush_attempt",
         "rushing_touchdown",
+        "no_rush_yards",
+        "no_rush_touchdown",
+        "no_reception_yards_1",
+        "no_reception_yards_2",
+        "no_reception_touchdown_1",
+        "no_reception_touchdown_2",
         "passing_yards",
         "rushing_yards",
     ]
@@ -125,6 +137,11 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             "target": "string",
             "receiver_id": "string",
             "runner_id": "string",
+            "no_rush_player_id": "string",
+            "no_reception_player_1_id": "string",
+            "no_reception_player_2_id": "string",
+            "fumble_lost_player_1_id": "string",
+            "fumble_lost_player_2_id": "string",
         },
         low_memory=False,
         memory_map=True,
@@ -186,9 +203,16 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         "scramble",
         "rec_yards",
         "reception",
+        "intercepted",
         "passing_touchdown",
         "rush_attempt",
         "rushing_touchdown",
+        "no_rush_yards",
+        "no_rush_touchdown",
+        "no_reception_yards_1",
+        "no_reception_yards_2",
+        "no_reception_touchdown_1",
+        "no_reception_touchdown_2",
         "no_play",
         "spiked_ball",
         "kneel_down",
@@ -210,6 +234,11 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     pbp["target"] = normalize_str(pbp["target"].astype("string"))
     pbp["receiver_id"] = normalize_str(pbp["receiver_id"].astype("string"))
     pbp["runner_id"] = normalize_str(pbp["runner_id"].astype("string"))
+    pbp["no_rush_player_id"] = normalize_str(pbp["no_rush_player_id"].astype("string"))
+    pbp["no_reception_player_1_id"] = normalize_str(pbp["no_reception_player_1_id"].astype("string"))
+    pbp["no_reception_player_2_id"] = normalize_str(pbp["no_reception_player_2_id"].astype("string"))
+    pbp["fumble_lost_player_1_id"] = normalize_str(pbp["fumble_lost_player_1_id"].astype("string"))
+    pbp["fumble_lost_player_2_id"] = normalize_str(pbp["fumble_lost_player_2_id"].astype("string"))
     pbp["yards_gained"] = pbp["passing_yards"].fillna(0) + pbp["rushing_yards"].fillna(0)
     pbp["display_week"] = map_display_week(pbp["week"], pbp["seasonType"])
 
@@ -804,25 +833,67 @@ def player_active_inactive_table(
     df["player_target"] = (
         ((df["receiver_id_norm"] == player_id) | (df["target_id"] == player_id)) & (df["is_target_event"] == 1)
     ).astype(int)
-    df["player_rec_yards"] = np.where(df["receiver_id_norm"] == player_id, df["rec_yards"].fillna(0), 0.0)
+    df["player_rec_yards_base"] = np.where(df["receiver_id_norm"] == player_id, df["rec_yards"].fillna(0), 0.0)
+    df["player_no_rec_yards"] = np.where(
+        df["no_reception_player_1_id"] == player_id,
+        df["no_reception_yards_1"].fillna(0),
+        0.0,
+    ) + np.where(
+        df["no_reception_player_2_id"] == player_id,
+        df["no_reception_yards_2"].fillna(0),
+        0.0,
+    )
+    df["player_rec_yards"] = df["player_rec_yards_base"] + df["player_no_rec_yards"]
     df["player_receptions"] = np.where((df["receiver_id_norm"] == player_id) & (df["reception"] == 1), 1, 0)
-    df["player_rec_td"] = np.where((df["receiver_id_norm"] == player_id) & (df["passing_touchdown"] == 1), 1, 0)
+    df["player_rec_td_base"] = np.where((df["receiver_id_norm"] == player_id) & (df["passing_touchdown"] == 1), 1, 0)
+    df["player_no_rec_td"] = np.where(
+        df["no_reception_player_1_id"] == player_id,
+        df["no_reception_touchdown_1"].fillna(0),
+        0,
+    ) + np.where(
+        df["no_reception_player_2_id"] == player_id,
+        df["no_reception_touchdown_2"].fillna(0),
+        0,
+    )
+    df["player_rec_td"] = df["player_rec_td_base"] + df["player_no_rec_td"]
     df["player_rush_att"] = np.where((df["runner_id_norm"] == player_id) & (df["rush_attempt"] == 1), 1, 0)
     df["player_designed_rush_att"] = np.where(
         (df["runner_id_norm"] == player_id) & (df["rush_attempt"] == 1) & (df["scramble"] != 1),
         1,
         0,
     )
-    df["player_rush_yards"] = np.where(df["runner_id_norm"] == player_id, df["rushing_yards"].fillna(0), 0.0)
-    df["player_rush_td"] = np.where((df["runner_id_norm"] == player_id) & (df["rushing_touchdown"] == 1), 1, 0)
+    df["player_rush_yards_base"] = np.where(df["runner_id_norm"] == player_id, df["rushing_yards"].fillna(0), 0.0)
+    df["player_no_rush_yards"] = np.where(
+        df["no_rush_player_id"] == player_id,
+        df["no_rush_yards"].fillna(0),
+        0.0,
+    )
+    df["player_rush_yards"] = df["player_rush_yards_base"] + df["player_no_rush_yards"]
+    df["player_rush_td_base"] = np.where((df["runner_id_norm"] == player_id) & (df["rushing_touchdown"] == 1), 1, 0)
+    df["player_no_rush_td"] = np.where(
+        df["no_rush_player_id"] == player_id,
+        df["no_rush_touchdown"].fillna(0),
+        0,
+    )
+    df["player_rush_td"] = df["player_rush_td_base"] + df["player_no_rush_td"]
     df["player_pass_att"] = np.where((df["passer_id_norm"] == player_id) & (df["attempt"] == 1), 1, 0)
     df["player_pass_yards"] = np.where(df["passer_id_norm"] == player_id, df["passing_yards"].fillna(0), 0.0)
     df["player_pass_td"] = np.where((df["passer_id_norm"] == player_id) & (df["passing_touchdown"] == 1), 1, 0)
+    df["player_int"] = np.where((df["passer_id_norm"] == player_id) & (df["intercepted"] == 1), 1, 0)
+    df["player_fumble_lost"] = np.where(
+        (df["fumble_lost_player_1_id"] == player_id) | (df["fumble_lost_player_2_id"] == player_id),
+        1,
+        0,
+    )
     df["player_dropback"] = np.where((df["passer_id_norm"] == player_id) & (df["dropback"] == 1), 1, 0)
     df["player_sack"] = np.where((df["passer_id_norm"] == player_id) & (df["sack"] == 1), 1, 0)
     df["player_scramble"] = np.where((df["passer_id_norm"] == player_id) & (df["scramble"] == 1), 1, 0)
     df["team_targets"] = df["is_target_event"]
-    df["team_rec_yards"] = df["rec_yards"].fillna(0)
+    df["team_rec_yards"] = (
+        df["rec_yards"].fillna(0)
+        + df["no_reception_yards_1"].fillna(0)
+        + df["no_reception_yards_2"].fillna(0)
+    )
     df["team_rush_att"] = (df["rush_attempt"] == 1).astype(int)
     df["team_designed_rush_att"] = ((df["rush_attempt"] == 1) & (df["scramble"] != 1)).astype(int)
     df["team_rush_td"] = (df["rushing_touchdown"] == 1).astype(int)
@@ -842,6 +913,8 @@ def player_active_inactive_table(
         pass_att = float(g["player_pass_att"].sum())
         pass_yards = float(g["player_pass_yards"].sum())
         pass_tds = float(g["player_pass_td"].sum())
+        ints = float(g["player_int"].sum())
+        fumbles_lost = float(g["player_fumble_lost"].sum())
         dropbacks = float(g["player_dropback"].sum())
         sacks = float(g["player_sack"].sum())
         scrambles = float(g["player_scramble"].sum())
@@ -860,6 +933,8 @@ def player_active_inactive_table(
             + rush_yards * 0.1
             + (rec_tds + rush_tds) * 6.0
             + receptions * float(reception_points)
+            - ints
+            - fumbles_lost
         )
         base["Fantasy Pts/Game"] = safe_div_scalar(fantasy_pts, games)
         if pos.startswith("QB"):
