@@ -1,6 +1,8 @@
 import io
 import os
 import tempfile
+from urllib.error import URLError
+from urllib.request import urlopen
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +19,14 @@ except Exception:  # pragma: no cover
 st.set_page_config(page_title="NFL On/Off Splits", layout="wide")
 
 DATA_DIR = Path(__file__).resolve().parent
+DATA_CACHE_DIR = Path.home() / ".cache" / "on_off_tool_data"
+REQUIRED_DATA_FILES = [
+    "participation.csv",
+    "play_by_play_data.csv",
+    "epa.csv",
+    "weekly_rosters.csv",
+    "pp_data.csv",
+]
 
 
 def normalize_team(series: pd.Series) -> pd.Series:
@@ -43,8 +53,77 @@ def map_display_week(week: pd.Series, season_type: pd.Series) -> pd.Series:
     return week + np.where(season_type == "POST", 18, 0)
 
 
+def _data_url_key(filename: str) -> str:
+    return f"DATA_URL_{filename.replace('.', '_').upper()}"
+
+
+def get_data_url_map() -> dict[str, str]:
+    url_map: dict[str, str] = {}
+
+    # Streamlit secrets (preferred for cloud deploy)
+    try:
+        if "data_urls" in st.secrets:
+            for k, v in dict(st.secrets["data_urls"]).items():
+                if isinstance(k, str) and isinstance(v, str) and v.strip():
+                    url_map[k.strip()] = v.strip()
+    except Exception:
+        pass
+
+    # Environment variables
+    for filename in REQUIRED_DATA_FILES:
+        env_key = _data_url_key(filename)
+        url_val = os.environ.get(env_key, "").strip()
+        if url_val:
+            url_map[filename] = url_val
+
+    base_url = os.environ.get("DATA_BASE_URL", "").strip().rstrip("/")
+    if base_url:
+        for filename in REQUIRED_DATA_FILES:
+            url_map.setdefault(filename, f"{base_url}/{filename}")
+
+    return url_map
+
+
+def ensure_data_file(filename: str) -> Path:
+    local_path = DATA_DIR / filename
+    if local_path.exists():
+        return local_path
+
+    url_map = get_data_url_map()
+    url = url_map.get(filename, "").strip()
+    if not url:
+        raise FileNotFoundError(
+            f"Missing required data file '{filename}'. "
+            f"Provide it locally at '{local_path}' or configure URL via st.secrets['data_urls']['{filename}'] "
+            f"or env var '{_data_url_key(filename)}'."
+        )
+
+    DATA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cached_path = DATA_CACHE_DIR / filename
+    if cached_path.exists() and cached_path.stat().st_size > 0:
+        return cached_path
+
+    try:
+        with urlopen(url, timeout=120) as resp:
+            payload = resp.read()
+    except URLError as exc:
+        raise RuntimeError(f"Failed to download '{filename}' from '{url}': {exc}") from exc
+
+    if not payload:
+        raise RuntimeError(f"Downloaded empty payload for '{filename}' from '{url}'.")
+
+    cached_path.write_bytes(payload)
+    return cached_path
+
+
 @st.cache_data(show_spinner=False)
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    part_path = ensure_data_file("participation.csv")
+    pbp_path = ensure_data_file("play_by_play_data.csv")
+    epa_path = ensure_data_file("epa.csv")
+    roster_path = ensure_data_file("weekly_rosters.csv")
+    pp_path = ensure_data_file("pp_data.csv")
+
     part_usecols = [
         "gameId",
         "season",
@@ -55,7 +134,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         "role",
     ] + [f"P{i}" for i in range(1, 16)]
     participation = pd.read_csv(
-        DATA_DIR / "participation.csv",
+        part_path,
         usecols=part_usecols,
         dtype={
             "gameId": "string",
@@ -123,7 +202,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         "rushing_yards",
     ]
     pbp = pd.read_csv(
-        DATA_DIR / "play_by_play_data.csv",
+        pbp_path,
         usecols=pbp_usecols,
         dtype={
             "game_id": "string",
@@ -154,7 +233,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     )
 
     epa = pd.read_csv(
-        DATA_DIR / "epa.csv",
+        epa_path,
         usecols=["gameId", "playId", "epa"],
         dtype={"gameId": "string", "playId": "string", "epa": "float64"},
         low_memory=False,
@@ -162,7 +241,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     )
 
     rosters = pd.read_csv(
-        DATA_DIR / "weekly_rosters.csv",
+        roster_path,
         usecols=[
             "Season",
             "SeasonType",
@@ -181,7 +260,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     )
 
     pp = pd.read_csv(
-        DATA_DIR / "pp_data.csv",
+        pp_path,
         usecols=["play id", "offense", "personnel"],
         dtype={"offense": "string"},
         low_memory=False,

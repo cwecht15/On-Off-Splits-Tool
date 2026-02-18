@@ -4,7 +4,6 @@
 
 - GitHub account
 - Repo containing this project
-- Git LFS installed locally (required for large CSV files)
 
 ## Repository Setup
 
@@ -12,14 +11,40 @@ From project root:
 
 ```powershell
 git init
-git lfs install
-git lfs track "*.csv"
-git add .gitattributes
 git add .
 git commit -m "Initial commit"
 git branch -M main
 git remote add origin https://github.com/<user-or-org>/<repo>.git
 git push -u origin main
+```
+
+Important: CSV data files are intentionally not tracked in git. The app downloads required files from URLs you provide in secrets/environment.
+
+## Data Source Configuration
+
+Required files:
+
+- `participation.csv`
+- `play_by_play_data.csv`
+- `epa.csv`
+- `weekly_rosters.csv`
+- `pp_data.csv`
+
+Configure one of these options:
+
+1. Streamlit secrets (recommended)
+2. Per-file env vars (`DATA_URL_PARTICIPATION_CSV`, etc.)
+3. Base URL env var (`DATA_BASE_URL`) that serves all required filenames
+
+Example `.streamlit/secrets.toml`:
+
+```toml
+[data_urls]
+participation.csv = "https://<your-storage>/participation.csv"
+play_by_play_data.csv = "https://<your-storage>/play_by_play_data.csv"
+epa.csv = "https://<your-storage>/epa.csv"
+weekly_rosters.csv = "https://<your-storage>/weekly_rosters.csv"
+pp_data.csv = "https://<your-storage>/pp_data.csv"
 ```
 
 ## Deploy Steps
@@ -63,8 +88,9 @@ If deployment fails, review recent `requirements.txt` changes first.
 App still using stale packages:
 - In Streamlit Cloud: `Clear cache` and `Reboot app`.
 
-Large-file push failures on GitHub:
-- Ensure `git lfs track "*.csv"` and re-push.
+Git LFS budget / clone failures:
+- Remove tracked CSVs from git and keep them in external storage.
+- Confirm Streamlit secrets include valid URLs for all required files.
 
 ## Update Workflow
 

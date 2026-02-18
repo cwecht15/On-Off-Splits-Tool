@@ -11,6 +11,18 @@ python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
+## Data Setup
+
+The app requires external CSV URLs (CSV files are not committed to git):
+
+- `participation.csv`
+- `play_by_play_data.csv`
+- `epa.csv`
+- `weekly_rosters.csv`
+- `pp_data.csv`
+
+Set these in Streamlit Cloud secrets under `[data_urls]` (see `docs/DEPLOYMENT_STREAMLIT_CLOUD.md`), or via env vars like `DATA_URL_PARTICIPATION_CSV`, or use `DATA_BASE_URL`.
+
 ## Documentation
 
 - Product and workflow: `docs/USER_GUIDE.md`
