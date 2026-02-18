@@ -749,7 +749,12 @@ player_options["label"] = (
 )
 player_options = player_options.sort_values(["name", "player_id"]).reset_index(drop=True)
 
-selected_labels = st.sidebar.multiselect("Players", player_options["label"].tolist(), default=player_options["label"].tolist()[:1])
+selected_labels = st.sidebar.multiselect(
+    "Players",
+    player_options["label"].tolist(),
+    default=player_options["label"].tolist()[:1],
+    key=f"players_{team}",
+)
 if not selected_labels:
     st.warning("Select at least one player.")
     st.stop()
