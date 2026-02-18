@@ -947,7 +947,7 @@ def top_player_diffs(
             if slot_df.empty:
                 continue
             slot_agg = (
-                slot_df.groupby(["team", "player_id"], dropna=False)
+                slot_df.groupby(["team", "player_id"], dropna=False, observed=False)
                 .agg(
                     on_plays=("epa", "size"),
                     on_epa_sum=("epa", "sum"),
@@ -966,7 +966,7 @@ def top_player_diffs(
 
     on_stats = (
         pd.concat(slot_aggs, ignore_index=True)
-        .groupby(["team", "player_id"], dropna=False)
+        .groupby(["team", "player_id"], dropna=False, observed=False)
         .agg(
             on_plays=("on_plays", "sum"),
             on_epa_sum=("on_epa_sum", "sum"),
@@ -1493,6 +1493,8 @@ player_options["label"] = (
 player_options = player_options.sort_values(["name", "player_id"]).reset_index(drop=True)
 
 selected_labels = st.sidebar.multiselect("Players", player_options["label"].tolist(), default=player_options["label"].tolist()[:1])
+valid_player_labels = set(player_options["label"].tolist())
+selected_labels = [lbl for lbl in selected_labels if isinstance(lbl, str) and lbl in valid_player_labels]
 if not selected_labels:
     st.warning("Select at least one player.")
     st.stop()
@@ -1500,6 +1502,9 @@ if not selected_labels:
 selected_player_ids = (
     player_options[player_options["label"].isin(selected_labels)]["player_id"].drop_duplicates().tolist()
 )
+if not selected_player_ids:
+    st.warning("Select at least one valid player.")
+    st.stop()
 on_mode = st.sidebar.radio("On definition", ["Any selected player on field", "All selected players on field"], index=0)
 
 team_scope = base_filtered[(base_filtered["offense"] == team) | (base_filtered["defense"] == team)]
