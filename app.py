@@ -863,11 +863,15 @@ def top_player_diffs(
         return num / den
 
     team_col = "offense" if role == "offense" else "defense"
-    team_plays = plays.copy()
+    needed_play_cols = ["gameId", "playId", team_col, "epa", "pass_play", "run_play", "down", "distance", "yards_gained"]
+    team_plays = plays[needed_play_cols].copy()
     if leaderboard_team:
         team_plays = team_plays[team_plays[team_col] == leaderboard_team]
     if team_plays.empty:
         return pd.DataFrame()
+
+    for col in ["epa", "pass_play", "run_play", "down", "distance", "yards_gained"]:
+        team_plays[col] = pd.to_numeric(team_plays[col], errors="coerce")
 
     team_plays["success_flag"] = build_success_flag(team_plays).astype(int)
     team_plays["pass_flag"] = (team_plays["pass_play"] == 1).astype(int)
@@ -891,42 +895,55 @@ def top_player_diffs(
     )
 
     player_cols = [f"P{i}" for i in range(1, 16)]
-    role_part = part_wide[part_wide["role"] == role][["gameId", "playId", "team"] + player_cols]
     play_core = team_plays[
         ["gameId", "playId", team_col, "epa", "success_flag", "pass_flag", "run_flag", "pass_epa", "run_epa"]
     ].rename(
         columns={team_col: "team"}
     )
-    role_part = role_part.merge(play_core, on=["gameId", "playId", "team"], how="inner")
-    if role_part.empty:
+    role_part_base = (
+        part_wide[part_wide["role"] == role][["gameId", "playId", "team"] + player_cols]
+        .drop_duplicates(subset=["gameId", "playId", "team"], keep="first")
+    )
+    if role_part_base.empty:
         return pd.DataFrame()
 
-    # Aggregate slot-by-slot to avoid building one massive melted dataframe for multi-season selections.
+    team_values = sorted([t for t in play_core["team"].dropna().astype(str).unique() if t])
     slot_aggs: list[pd.DataFrame] = []
     stat_cols = ["team", "epa", "success_flag", "pass_flag", "run_flag", "pass_epa", "run_epa"]
-    for slot_col in player_cols:
-        slot_df = role_part[stat_cols + [slot_col]].rename(columns={slot_col: "player_id"})
-        slot_df = slot_df.dropna(subset=["player_id"])
-        if slot_df.empty:
+    for team_value in team_values:
+        team_play_core = play_core[play_core["team"] == team_value]
+        team_part = role_part_base[role_part_base["team"] == team_value]
+        if team_play_core.empty or team_part.empty:
             continue
-        slot_df["player_id"] = normalize_str(slot_df["player_id"].astype("string"))
-        slot_df = slot_df[slot_df["player_id"].str.len() > 0]
-        if slot_df.empty:
+
+        role_part = team_part.merge(team_play_core, on=["gameId", "playId", "team"], how="inner")
+        if role_part.empty:
             continue
-        slot_agg = (
-            slot_df.groupby(["team", "player_id"], dropna=False)
-            .agg(
-                on_plays=("epa", "size"),
-                on_epa_sum=("epa", "sum"),
-                on_success_sum=("success_flag", "sum"),
-                on_pass_sum=("pass_flag", "sum"),
-                on_run_sum=("run_flag", "sum"),
-                on_pass_epa_sum=("pass_epa", "sum"),
-                on_run_epa_sum=("run_epa", "sum"),
+
+        # Aggregate slot-by-slot per team to keep peak memory bounded.
+        for slot_col in player_cols:
+            slot_df = role_part[stat_cols + [slot_col]].rename(columns={slot_col: "player_id"})
+            slot_df = slot_df.dropna(subset=["player_id"])
+            if slot_df.empty:
+                continue
+            slot_df["player_id"] = normalize_str(slot_df["player_id"].astype("string"))
+            slot_df = slot_df[slot_df["player_id"].str.len() > 0]
+            if slot_df.empty:
+                continue
+            slot_agg = (
+                slot_df.groupby(["team", "player_id"], dropna=False)
+                .agg(
+                    on_plays=("epa", "size"),
+                    on_epa_sum=("epa", "sum"),
+                    on_success_sum=("success_flag", "sum"),
+                    on_pass_sum=("pass_flag", "sum"),
+                    on_run_sum=("run_flag", "sum"),
+                    on_pass_epa_sum=("pass_epa", "sum"),
+                    on_run_epa_sum=("run_epa", "sum"),
+                )
+                .reset_index()
             )
-            .reset_index()
-        )
-        slot_aggs.append(slot_agg)
+            slot_aggs.append(slot_agg)
 
     if not slot_aggs:
         return pd.DataFrame()
