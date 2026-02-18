@@ -18,7 +18,28 @@ git remote add origin https://github.com/<user-or-org>/<repo>.git
 git push -u origin main
 ```
 
-Important: CSV data files are intentionally not tracked in git. The app downloads required files from URLs you provide in secrets/environment.
+Important: CSV data files are intentionally not tracked in git.
+The app uses Postgres when configured, otherwise it downloads required files from URLs you provide in secrets/environment.
+
+## Postgres Configuration (Recommended)
+
+In Streamlit Cloud app settings, add secrets:
+
+```toml
+[postgres]
+dsn = "postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
+participation_table = "participation"
+play_by_play_data_table = "play_by_play_data"
+epa_table = "epa"
+weekly_rosters_table = "weekly_rosters"
+pp_data_table = "pp_data"
+```
+
+Notes:
+
+- `dsn` can also be set as env var `POSTGRES_DSN`.
+- Table names are optional if you use defaults above.
+- Per-table env vars are also supported (`POSTGRES_TABLE_PARTICIPATION`, etc.).
 
 ## Data Source Configuration
 
@@ -30,7 +51,7 @@ Required files:
 - `weekly_rosters.csv`
 - `pp_data.csv`
 
-Configure one of these options:
+Configure one of these options when Postgres is not set:
 
 1. Streamlit secrets (recommended)
 2. Per-file env vars (`DATA_URL_PARTICIPATION_CSV`, etc.)

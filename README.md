@@ -13,7 +13,26 @@ python -m streamlit run app.py
 
 ## Data Setup
 
-The app requires external CSV URLs (CSV files are not committed to git):
+Data source priority:
+
+1. Postgres (if configured)
+2. External CSV URLs/local files fallback
+
+### Postgres (recommended)
+
+Set `[postgres]` secrets (see `.streamlit/secrets.example.toml`):
+
+- `dsn`
+- optional table overrides:
+  - `participation_table`
+  - `play_by_play_data_table`
+  - `epa_table`
+  - `weekly_rosters_table`
+  - `pp_data_table`
+
+### CSV URL fallback
+
+If Postgres is not configured, the app requires external CSV URLs (CSV files are not committed to git):
 
 - `participation.csv`
 - `play_by_play_data.csv`

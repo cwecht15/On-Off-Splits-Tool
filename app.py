@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import tempfile
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -10,6 +11,7 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+import psycopg
 
 try:
     from fpdf import FPDF
@@ -27,6 +29,7 @@ REQUIRED_DATA_FILES = [
     "weekly_rosters.csv",
     "pp_data.csv",
 ]
+PG_TABLE_ENV_PREFIX = "POSTGRES_TABLE_"
 
 
 def normalize_team(series: pd.Series) -> pd.Series:
@@ -55,6 +58,217 @@ def map_display_week(week: pd.Series, season_type: pd.Series) -> pd.Series:
 
 def _data_url_key(filename: str) -> str:
     return f"DATA_URL_{filename.replace('.', '_').upper()}"
+
+
+def _normalize_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def _table_ident(name: str) -> str:
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("Postgres table name is empty.")
+    parts = name.strip().split(".")
+    for p in parts:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", p):
+            raise ValueError(f"Invalid Postgres table identifier part '{p}'.")
+    return ".".join(f'"{p}"' for p in parts)
+
+
+def _extract_columns(
+    raw_df: pd.DataFrame,
+    column_candidates: dict[str, list[str]],
+    dataset_label: str,
+) -> pd.DataFrame:
+    normalized_lookup = {_normalize_key(c): c for c in raw_df.columns}
+    out = pd.DataFrame(index=raw_df.index)
+    missing: list[str] = []
+    for target, candidates in column_candidates.items():
+        found = None
+        for candidate in candidates:
+            key = _normalize_key(candidate)
+            if key in normalized_lookup:
+                found = normalized_lookup[key]
+                break
+        if found is None:
+            missing.append(target)
+        else:
+            out[target] = raw_df[found]
+
+    if missing:
+        preview = ", ".join(sorted(str(c) for c in raw_df.columns[:30]))
+        raise KeyError(
+            f"Postgres dataset '{dataset_label}' missing required columns: {missing}. "
+            f"Available columns (first 30): {preview}"
+        )
+    return out
+
+
+def get_postgres_config() -> dict[str, str] | None:
+    dsn = os.environ.get("POSTGRES_DSN", "").strip()
+
+    try:
+        if "postgres" in st.secrets:
+            pg_sec = dict(st.secrets["postgres"])
+            dsn = str(pg_sec.get("dsn", dsn)).strip()
+    except Exception:
+        pg_sec = {}
+
+    if not dsn:
+        return None
+
+    table_defaults = {
+        "participation": "participation",
+        "play_by_play_data": "play_by_play_data",
+        "epa": "epa",
+        "weekly_rosters": "weekly_rosters",
+        "pp_data": "pp_data",
+    }
+
+    table_map = table_defaults.copy()
+    for logical_name, default_table in table_defaults.items():
+        env_key = f"{PG_TABLE_ENV_PREFIX}{logical_name.upper()}"
+        if os.environ.get(env_key, "").strip():
+            table_map[logical_name] = os.environ[env_key].strip()
+
+    try:
+        if "postgres" in st.secrets:
+            pg_sec = dict(st.secrets["postgres"])
+            for logical_name, default_table in table_defaults.items():
+                table_map[logical_name] = str(pg_sec.get(f"{logical_name}_table", table_map[logical_name])).strip()
+                if not table_map[logical_name]:
+                    table_map[logical_name] = default_table
+    except Exception:
+        pass
+
+    return {"dsn": dsn, **table_map}
+
+
+def load_raw_data_from_postgres(pg_cfg: dict[str, str]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    def fetch_all(conn: psycopg.Connection, table_name: str, label: str) -> pd.DataFrame:
+        sql = f"SELECT * FROM {_table_ident(table_name)}"
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+            cols = [desc.name for desc in cur.description]
+        return pd.DataFrame(rows, columns=cols)
+
+    with psycopg.connect(pg_cfg["dsn"], connect_timeout=15) as conn:
+        part_raw = fetch_all(conn, pg_cfg["participation"], "participation")
+        pbp_raw = fetch_all(conn, pg_cfg["play_by_play_data"], "play_by_play_data")
+        epa_raw = fetch_all(conn, pg_cfg["epa"], "epa")
+        rosters_raw = fetch_all(conn, pg_cfg["weekly_rosters"], "weekly_rosters")
+        pp_raw = fetch_all(conn, pg_cfg["pp_data"], "pp_data")
+
+    participation = _extract_columns(
+        part_raw,
+        {
+            "gameId": ["gameId", "game_id"],
+            "season": ["season"],
+            "seasonType": ["seasonType", "season_type", "seas_type"],
+            "week": ["week"],
+            "playId": ["playId", "play_id"],
+            "team": ["team"],
+            "role": ["role"],
+            **{f"P{i}": [f"P{i}", f"p{i}"] for i in range(1, 16)},
+        },
+        "participation",
+    )
+
+    pbp = _extract_columns(
+        pbp_raw,
+        {
+            "season": ["season"],
+            "seasonType": ["seas_type", "seasonType", "season_type"],
+            "week": ["week"],
+            "gameId": ["game_id", "gameId"],
+            "playId": ["play_id", "playId"],
+            "offense": ["offense"],
+            "defense": ["defense"],
+            "passer_id": ["passer_id", "passerid"],
+            "target": ["target"],
+            "receiver_id": ["receiver_id", "receiverid"],
+            "runner_id": ["runner_id", "runnerid"],
+            "no_rush_player_id": ["no_rush_player_id", "norushplayerid"],
+            "no_reception_player_1_id": ["no_reception_player_1_id", "no_reception_player_id_1"],
+            "no_reception_player_2_id": ["no_reception_player_2_id", "no_reception_player_id_2"],
+            "fumble_lost_player_1_id": ["fumble_lost_player_1_id", "fumble_lost_player_id_1", "fumble_lost_player_id"],
+            "fumble_lost_player_2_id": ["fumble_lost_player_2_id", "fumble_lost_player_id_2"],
+            "offense_score": ["offense_score"],
+            "defense_score": ["defense_score"],
+            "quarter": ["quarter", "qtr"],
+            "down": ["down"],
+            "distance": ["distance", "ydstogo"],
+            "yards_to_score": ["yards_to_score", "yardline_100"],
+            "pass_play": ["pass_play"],
+            "run_play": ["run_play"],
+            "no_play": ["no_play"],
+            "spiked_ball": ["spiked_ball", "spike"],
+            "kneel_down": ["kneel_down"],
+            "two_point_att": ["two_point_att", "two_point_attempt"],
+            "kickoff": ["kickoff"],
+            "punt": ["punt"],
+            "field_goal": ["field_goal"],
+            "extra_point": ["extra_point"],
+            "attempt": ["attempt", "pass_attempt"],
+            "dropback": ["dropback"],
+            "sack": ["sack"],
+            "scramble": ["scramble"],
+            "rec_yards": ["rec_yards", "receiving_yards"],
+            "reception": ["reception"],
+            "intercepted": ["intercepted", "interception"],
+            "passing_touchdown": ["passing_touchdown", "pass_touchdown"],
+            "rush_attempt": ["rush_attempt"],
+            "rushing_touchdown": ["rushing_touchdown", "rush_touchdown"],
+            "no_rush_yards": ["no_rush_yards"],
+            "no_rush_touchdown": ["no_rush_touchdown"],
+            "no_reception_yards_1": ["no_reception_yards_1"],
+            "no_reception_yards_2": ["no_reception_yards_2"],
+            "no_reception_touchdown_1": ["no_reception_touchdown_1"],
+            "no_reception_touchdown_2": ["no_reception_touchdown_2"],
+            "passing_yards": ["passing_yards"],
+            "rushing_yards": ["rushing_yards"],
+        },
+        "play_by_play_data",
+    )
+
+    epa = _extract_columns(
+        epa_raw,
+        {
+            "gameId": ["gameId", "game_id"],
+            "playId": ["playId", "play_id"],
+            "epa": ["epa"],
+        },
+        "epa",
+    )
+
+    rosters = _extract_columns(
+        rosters_raw,
+        {
+            "Season": ["Season", "season"],
+            "SeasonType": ["SeasonType", "seasonType", "season_type", "seas_type"],
+            "Week": ["Week", "week"],
+            "GsisID": ["GsisID", "gsis_id", "player_id"],
+            "FirstName": ["FirstName", "first_name"],
+            "LastName": ["LastName", "last_name"],
+            "FootballName": ["FootballName", "football_name"],
+            "CurrentClub": ["CurrentClub", "current_club", "team"],
+            "Position": ["Position", "position"],
+            "StatusShortDescription": ["StatusShortDescription", "status_short_description", "status"],
+        },
+        "weekly_rosters",
+    )
+
+    pp = _extract_columns(
+        pp_raw,
+        {
+            "play id": ["play id", "play_id", "playid"],
+            "offense": ["offense"],
+            "personnel": ["personnel"],
+        },
+        "pp_data",
+    )
+
+    return participation, pbp, epa, rosters, pp
 
 
 def get_data_url_map() -> dict[str, str]:
@@ -118,154 +332,158 @@ def ensure_data_file(filename: str) -> Path:
 
 @st.cache_data(show_spinner=False)
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    part_path = ensure_data_file("participation.csv")
-    pbp_path = ensure_data_file("play_by_play_data.csv")
-    epa_path = ensure_data_file("epa.csv")
-    roster_path = ensure_data_file("weekly_rosters.csv")
-    pp_path = ensure_data_file("pp_data.csv")
+    pg_cfg = get_postgres_config()
+    if pg_cfg:
+        participation, pbp, epa, rosters, pp = load_raw_data_from_postgres(pg_cfg)
+    else:
+        part_path = ensure_data_file("participation.csv")
+        pbp_path = ensure_data_file("play_by_play_data.csv")
+        epa_path = ensure_data_file("epa.csv")
+        roster_path = ensure_data_file("weekly_rosters.csv")
+        pp_path = ensure_data_file("pp_data.csv")
 
-    part_usecols = [
-        "gameId",
-        "season",
-        "seasonType",
-        "week",
-        "playId",
-        "team",
-        "role",
-    ] + [f"P{i}" for i in range(1, 16)]
-    participation = pd.read_csv(
-        part_path,
-        usecols=part_usecols,
-        dtype={
-            "gameId": "string",
-            "playId": "string",
-            "season": "Int64",
-            "seasonType": "string",
-            "week": "Int64",
-            "team": "string",
-            "role": "string",
-        },
-        low_memory=False,
-        memory_map=True,
-    )
+        part_usecols = [
+            "gameId",
+            "season",
+            "seasonType",
+            "week",
+            "playId",
+            "team",
+            "role",
+        ] + [f"P{i}" for i in range(1, 16)]
+        participation = pd.read_csv(
+            part_path,
+            usecols=part_usecols,
+            dtype={
+                "gameId": "string",
+                "playId": "string",
+                "season": "Int64",
+                "seasonType": "string",
+                "week": "Int64",
+                "team": "string",
+                "role": "string",
+            },
+            low_memory=False,
+            memory_map=True,
+        )
 
-    pbp_usecols = [
-        "season",
-        "seas_type",
-        "week",
-        "game_id",
-        "play_id",
-        "offense",
-        "defense",
-        "passer_id",
-        "target",
-        "receiver_id",
-        "runner_id",
-        "no_rush_player_id",
-        "no_reception_player_1_id",
-        "no_reception_player_2_id",
-        "fumble_lost_player_1_id",
-        "fumble_lost_player_2_id",
-        "offense_score",
-        "defense_score",
-        "quarter",
-        "down",
-        "distance",
-        "yards_to_score",
-        "pass_play",
-        "run_play",
-        "no_play",
-        "spiked_ball",
-        "kneel_down",
-        "two_point_att",
-        "kickoff",
-        "punt",
-        "field_goal",
-        "extra_point",
-        "attempt",
-        "dropback",
-        "sack",
-        "scramble",
-        "rec_yards",
-        "reception",
-        "intercepted",
-        "passing_touchdown",
-        "rush_attempt",
-        "rushing_touchdown",
-        "no_rush_yards",
-        "no_rush_touchdown",
-        "no_reception_yards_1",
-        "no_reception_yards_2",
-        "no_reception_touchdown_1",
-        "no_reception_touchdown_2",
-        "passing_yards",
-        "rushing_yards",
-    ]
-    pbp = pd.read_csv(
-        pbp_path,
-        usecols=pbp_usecols,
-        dtype={
-            "game_id": "string",
-            "play_id": "string",
-            "season": "Int64",
-            "seas_type": "string",
-            "week": "Int64",
-            "offense": "string",
-            "defense": "string",
-            "passer_id": "string",
-            "target": "string",
-            "receiver_id": "string",
-            "runner_id": "string",
-            "no_rush_player_id": "string",
-            "no_reception_player_1_id": "string",
-            "no_reception_player_2_id": "string",
-            "fumble_lost_player_1_id": "string",
-            "fumble_lost_player_2_id": "string",
-        },
-        low_memory=False,
-        memory_map=True,
-    ).rename(
-        columns={
-            "game_id": "gameId",
-            "play_id": "playId",
-            "seas_type": "seasonType",
-        }
-    )
+        pbp_usecols = [
+            "season",
+            "seas_type",
+            "week",
+            "game_id",
+            "play_id",
+            "offense",
+            "defense",
+            "passer_id",
+            "target",
+            "receiver_id",
+            "runner_id",
+            "no_rush_player_id",
+            "no_reception_player_1_id",
+            "no_reception_player_2_id",
+            "fumble_lost_player_1_id",
+            "fumble_lost_player_2_id",
+            "offense_score",
+            "defense_score",
+            "quarter",
+            "down",
+            "distance",
+            "yards_to_score",
+            "pass_play",
+            "run_play",
+            "no_play",
+            "spiked_ball",
+            "kneel_down",
+            "two_point_att",
+            "kickoff",
+            "punt",
+            "field_goal",
+            "extra_point",
+            "attempt",
+            "dropback",
+            "sack",
+            "scramble",
+            "rec_yards",
+            "reception",
+            "intercepted",
+            "passing_touchdown",
+            "rush_attempt",
+            "rushing_touchdown",
+            "no_rush_yards",
+            "no_rush_touchdown",
+            "no_reception_yards_1",
+            "no_reception_yards_2",
+            "no_reception_touchdown_1",
+            "no_reception_touchdown_2",
+            "passing_yards",
+            "rushing_yards",
+        ]
+        pbp = pd.read_csv(
+            pbp_path,
+            usecols=pbp_usecols,
+            dtype={
+                "game_id": "string",
+                "play_id": "string",
+                "season": "Int64",
+                "seas_type": "string",
+                "week": "Int64",
+                "offense": "string",
+                "defense": "string",
+                "passer_id": "string",
+                "target": "string",
+                "receiver_id": "string",
+                "runner_id": "string",
+                "no_rush_player_id": "string",
+                "no_reception_player_1_id": "string",
+                "no_reception_player_2_id": "string",
+                "fumble_lost_player_1_id": "string",
+                "fumble_lost_player_2_id": "string",
+            },
+            low_memory=False,
+            memory_map=True,
+        ).rename(
+            columns={
+                "game_id": "gameId",
+                "play_id": "playId",
+                "seas_type": "seasonType",
+            }
+        )
 
-    epa = pd.read_csv(
-        epa_path,
-        usecols=["gameId", "playId", "epa"],
-        dtype={"gameId": "string", "playId": "string", "epa": "float64"},
-        low_memory=False,
-        memory_map=True,
-    )
+        epa = pd.read_csv(
+            epa_path,
+            usecols=["gameId", "playId", "epa"],
+            dtype={"gameId": "string", "playId": "string", "epa": "float64"},
+            low_memory=False,
+            memory_map=True,
+        )
 
-    rosters = pd.read_csv(
-        roster_path,
-        usecols=[
-            "Season",
-            "SeasonType",
-            "Week",
-            "GsisID",
-            "FirstName",
-            "LastName",
-            "FootballName",
-            "CurrentClub",
-            "Position",
-            "StatusShortDescription",
-        ],
-        dtype={"GsisID": "string", "CurrentClub": "string", "SeasonType": "string"},
-        low_memory=False,
-        memory_map=True,
-    )
+        rosters = pd.read_csv(
+            roster_path,
+            usecols=[
+                "Season",
+                "SeasonType",
+                "Week",
+                "GsisID",
+                "FirstName",
+                "LastName",
+                "FootballName",
+                "CurrentClub",
+                "Position",
+                "StatusShortDescription",
+            ],
+            dtype={"GsisID": "string", "CurrentClub": "string", "SeasonType": "string"},
+            low_memory=False,
+            memory_map=True,
+        )
 
-    pp = pd.read_csv(
-        pp_path,
-        usecols=["play id", "offense", "personnel"],
-        dtype={"offense": "string"},
-        low_memory=False,
-        memory_map=True,
-    )
+        pp = pd.read_csv(
+            pp_path,
+            usecols=["play id", "offense", "personnel"],
+            dtype={"offense": "string"},
+            low_memory=False,
+            memory_map=True,
+        )
 
     num_cols = [
         "offense_score",
