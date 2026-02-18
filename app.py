@@ -1492,19 +1492,37 @@ player_options["label"] = (
 )
 player_options = player_options.sort_values(["name", "player_id"]).reset_index(drop=True)
 
-selected_labels = st.sidebar.multiselect("Players", player_options["label"].tolist(), default=player_options["label"].tolist()[:1])
-valid_player_labels = set(player_options["label"].tolist())
+player_label_options = player_options["label"].tolist()
+valid_player_labels = set(player_label_options)
+player_select_key = "main_selected_players"
+existing_labels = st.session_state.get(player_select_key, [])
+if not isinstance(existing_labels, list):
+    existing_labels = []
+existing_labels = [lbl for lbl in existing_labels if isinstance(lbl, str) and lbl in valid_player_labels]
+if not existing_labels and player_label_options:
+    existing_labels = [player_label_options[0]]
+st.session_state[player_select_key] = existing_labels
+
+selected_labels = st.sidebar.multiselect("Players", player_label_options, key=player_select_key)
 selected_labels = [lbl for lbl in selected_labels if isinstance(lbl, str) and lbl in valid_player_labels]
+if not selected_labels and player_label_options:
+    st.session_state[player_select_key] = [player_label_options[0]]
+    st.rerun()
 if not selected_labels:
-    st.warning("Select at least one player.")
+    st.warning("No valid player options for this team/season selection.")
     st.stop()
 
 selected_player_ids = (
     player_options[player_options["label"].isin(selected_labels)]["player_id"].drop_duplicates().tolist()
 )
 if not selected_player_ids:
-    st.warning("Select at least one valid player.")
-    st.stop()
+    fallback_pid = player_options["player_id"].dropna().astype(str)
+    fallback_pid = fallback_pid[fallback_pid.str.len() > 0]
+    if not fallback_pid.empty:
+        selected_player_ids = [fallback_pid.iloc[0]]
+    else:
+        st.warning("Select at least one valid player.")
+        st.stop()
 on_mode = st.sidebar.radio("On definition", ["Any selected player on field", "All selected players on field"], index=0)
 
 team_scope = base_filtered[(base_filtered["offense"] == team) | (base_filtered["defense"] == team)]
