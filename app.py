@@ -722,13 +722,37 @@ def safe_div_scalar(num: float, den: float) -> float:
     return num / den
 
 
-def game_status_split(team_plays: pd.DataFrame, rosters: pd.DataFrame, team: str, split_player_id: str) -> pd.DataFrame:
+def game_status_split(
+    team_plays: pd.DataFrame,
+    part_wide: pd.DataFrame,
+    team: str,
+    split_player_id: str,
+    min_snap_threshold: int,
+) -> pd.DataFrame:
     games = team_plays[["gameId", "display_week"]].drop_duplicates()
-    status_rows = rosters[(rosters["team"] == team) & (rosters["player_id"] == split_player_id)][["display_week", "status"]]
-    status_map = status_rows.drop_duplicates(subset=["display_week"]).set_index("display_week")["status"].to_dict()
-    games["status_value"] = games["display_week"].map(status_map).fillna("INACTIVE")
-    games["split"] = np.where(games["status_value"].eq("ACTIVE"), "Active", "Inactive")
-    return games[["gameId", "split"]]
+    player_cols = [f"P{i}" for i in range(1, 16)]
+    team_part = part_wide[(part_wide["team"] == team) & (part_wide["role"] == "offense")][["gameId", "playId"] + player_cols]
+    if team_part.empty:
+        games["split"] = f"<{min_snap_threshold} snaps"
+        games["player_snaps"] = 0
+        return games[["gameId", "split", "player_snaps"]]
+
+    on_mask = team_part[player_cols].eq(split_player_id).any(axis=1)
+    snap_counts = (
+        team_part.loc[on_mask, ["gameId", "playId"]]
+        .drop_duplicates()
+        .groupby("gameId")
+        .size()
+        .reset_index(name="player_snaps")
+    )
+    games = games.merge(snap_counts, on="gameId", how="left")
+    games["player_snaps"] = games["player_snaps"].fillna(0).astype(int)
+    games["split"] = np.where(
+        games["player_snaps"] < int(min_snap_threshold),
+        f"<{min_snap_threshold} snaps",
+        f">={min_snap_threshold} snaps",
+    )
+    return games[["gameId", "split", "player_snaps"]]
 
 
 def team_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataFrame) -> pd.DataFrame:
@@ -1351,12 +1375,12 @@ with tab_onoff_hint:
     st.info("Use the sections above for standard on/off analysis.")
 
 with tab_status:
-    st.markdown("### Active/Inactive Team + Player Splits")
+    st.markdown("### Snap-Threshold Team + Player Splits")
     status_team_options = sorted([str(x) for x in roster_filtered["team"].dropna().astype(str).unique() if str(x)])
     if not status_team_options:
         st.info("No teams available for current season/week filters.")
     else:
-        col_a, col_b, col_c = st.columns(3)
+        col_a, col_b, col_c, col_d = st.columns(4)
         with col_a:
             status_team = st.selectbox("Status Split Team", status_team_options, key="status_team")
 
@@ -1394,6 +1418,14 @@ with tab_status:
                     status_roster["label"].tolist(),
                     key="status_second_player",
                 )
+            with col_d:
+                min_snap_threshold = st.number_input(
+                    "Low-snap threshold (< snaps)",
+                    min_value=0,
+                    value=1,
+                    step=1,
+                    key="status_snap_threshold",
+                )
             second_player_row = status_roster[status_roster["label"] == second_player_label].iloc[0]
             second_player_id = str(second_player_row["player_id"])
             second_player_pos = str(normalize_position(pd.Series([second_player_row["position"]])).iloc[0])
@@ -1402,11 +1434,17 @@ with tab_status:
             if status_team_plays.empty:
                 st.info("No team offensive plays for selected season/week.")
             else:
-                games_split = game_status_split(status_team_plays, roster_filtered, status_team, split_player_id)
+                games_split = game_status_split(
+                    status_team_plays,
+                    part_filtered,
+                    status_team,
+                    split_player_id,
+                    int(min_snap_threshold),
+                )
                 team_status_table = team_active_inactive_table(status_team_plays, games_split)
                 player_status_table = player_active_inactive_table(status_team_plays, games_split, second_player_id, second_player_pos)
 
-                st.markdown("#### Team Results (Split By Selected Player Status)")
+                st.markdown("#### Team Results (Split By Selected Player Snaps)")
                 if team_status_table.empty:
                     st.info("No team status split rows.")
                 else:
