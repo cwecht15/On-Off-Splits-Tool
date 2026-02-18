@@ -733,7 +733,7 @@ def split_for_role(
             team_plays = plays[plays["defense"] == team]
         team_plays = apply_margin_filter(team_plays, role, margin_range)
     else:
-        team_plays = team_plays_override.copy()
+        team_plays = team_plays_override
 
     if team_plays.empty:
         return pd.DataFrame(columns=["Split", "Plays", "EPA/play", "Success Rate", "Pass Rate", "Run Rate"]), pd.DataFrame()
@@ -762,8 +762,11 @@ def split_for_role(
         ]
     )
 
-    team_plays["personnel_label"] = team_plays["personnel"].astype("Int64").astype("string").fillna("Unknown")
-    personnel_group = summarize_group(team_plays, ["personnel_label", "is_on"])
+    personnel_src = team_plays[
+        ["personnel", "is_on", "epa", "pass_play", "run_play", "down", "distance", "yards_gained"]
+    ].copy()
+    personnel_src["personnel_label"] = personnel_src["personnel"].astype("Int64").astype("string").fillna("Unknown")
+    personnel_group = summarize_group(personnel_src, ["personnel_label", "is_on"])
     if not personnel_group.empty:
         personnel_group["Split"] = np.where(personnel_group["is_on"] == 1, "On", "Off")
         personnel_group = personnel_group.drop(columns=["is_on"]).rename(columns={"personnel_label": "Personnel"})
@@ -814,7 +817,7 @@ def trend_table(
             team_plays = plays[plays["defense"] == team]
         team_plays = apply_margin_filter(team_plays, role, margin_range)
     else:
-        team_plays = team_plays_override.copy()
+        team_plays = team_plays_override
 
     if team_plays.empty:
         return pd.DataFrame(columns=["display_week", "On EPA/play", "Off EPA/play", "On Plays", "Off Plays"])
@@ -1564,6 +1567,9 @@ offense_on_keys = get_on_keys(part_filtered, team, "offense", selected_player_id
 defense_on_keys = get_on_keys(part_filtered, team, "defense", selected_player_ids, on_mode)
 offense_team_plays = apply_margin_filter(base_filtered[base_filtered["offense"] == team], "offense", score_margin_range)
 defense_team_plays = apply_margin_filter(base_filtered[base_filtered["defense"] == team], "defense", score_margin_range)
+onoff_cols = ["gameId", "playId", "epa", "pass_play", "run_play", "down", "distance", "yards_gained", "display_week", "personnel"]
+offense_team_plays = offense_team_plays[onoff_cols]
+defense_team_plays = defense_team_plays[onoff_cols]
 offense_tagged_plays = offense_team_plays.merge(offense_on_keys, on=["gameId", "playId"], how="left")
 offense_tagged_plays["is_on"] = offense_tagged_plays["is_on"].fillna(0).astype(int)
 defense_tagged_plays = defense_team_plays.merge(defense_on_keys, on=["gameId", "playId"], how="left")
