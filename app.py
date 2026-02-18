@@ -78,6 +78,10 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         "play_id",
         "offense",
         "defense",
+        "passer_id",
+        "target",
+        "receiver_id",
+        "runner_id",
         "offense_score",
         "defense_score",
         "quarter",
@@ -94,6 +98,14 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         "punt",
         "field_goal",
         "extra_point",
+        "attempt",
+        "dropback",
+        "sack",
+        "scramble",
+        "rec_yards",
+        "passing_touchdown",
+        "rush_attempt",
+        "rushing_touchdown",
         "passing_yards",
         "rushing_yards",
     ]
@@ -108,6 +120,10 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             "week": "Int64",
             "offense": "string",
             "defense": "string",
+            "passer_id": "string",
+            "target": "string",
+            "receiver_id": "string",
+            "runner_id": "string",
         },
         low_memory=False,
         memory_map=True,
@@ -139,6 +155,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             "FootballName",
             "CurrentClub",
             "Position",
+            "StatusShortDescription",
         ],
         dtype={"GsisID": "string", "CurrentClub": "string", "SeasonType": "string"},
         low_memory=False,
@@ -162,6 +179,14 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         "yards_to_score",
         "pass_play",
         "run_play",
+        "attempt",
+        "dropback",
+        "sack",
+        "scramble",
+        "rec_yards",
+        "passing_touchdown",
+        "rush_attempt",
+        "rushing_touchdown",
         "no_play",
         "spiked_ball",
         "kneel_down",
@@ -179,6 +204,10 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     pbp["seasonType"] = normalize_str(pbp["seasonType"]).str.upper()
     pbp["offense"] = normalize_team(pbp["offense"])
     pbp["defense"] = normalize_team(pbp["defense"])
+    pbp["passer_id"] = normalize_str(pbp["passer_id"].astype("string"))
+    pbp["target"] = normalize_str(pbp["target"].astype("string"))
+    pbp["receiver_id"] = normalize_str(pbp["receiver_id"].astype("string"))
+    pbp["runner_id"] = normalize_str(pbp["runner_id"].astype("string"))
     pbp["yards_gained"] = pbp["passing_yards"].fillna(0) + pbp["rushing_yards"].fillna(0)
     pbp["display_week"] = map_display_week(pbp["week"], pbp["seasonType"])
 
@@ -222,6 +251,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             "GsisID": "player_id",
             "CurrentClub": "team",
             "Position": "position",
+            "StatusShortDescription": "status",
         }
     )
     rosters["season"] = pd.to_numeric(rosters["season"], errors="coerce").astype("Int64")
@@ -230,6 +260,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     rosters["team"] = normalize_team(rosters["team"])
     rosters["player_id"] = normalize_str(rosters["player_id"])
     rosters["position"] = normalize_position(rosters["position"])
+    rosters["status"] = normalize_str(rosters["status"]).str.upper()
     rosters["display_week"] = map_display_week(rosters["week"], rosters["seasonType"])
 
     for col in ["seasonType", "offense", "defense"]:
@@ -685,6 +716,137 @@ def top_player_diffs(
     )
 
 
+def safe_div_scalar(num: float, den: float) -> float:
+    if den == 0 or pd.isna(den):
+        return np.nan
+    return num / den
+
+
+def game_status_split(team_plays: pd.DataFrame, rosters: pd.DataFrame, team: str, split_player_id: str) -> pd.DataFrame:
+    games = team_plays[["gameId", "display_week"]].drop_duplicates()
+    status_rows = rosters[(rosters["team"] == team) & (rosters["player_id"] == split_player_id)][["display_week", "status"]]
+    status_map = status_rows.drop_duplicates(subset=["display_week"]).set_index("display_week")["status"].to_dict()
+    games["status_value"] = games["display_week"].map(status_map).fillna("INACTIVE")
+    games["split"] = np.where(games["status_value"].eq("ACTIVE"), "Active", "Inactive")
+    return games[["gameId", "split"]]
+
+
+def team_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataFrame) -> pd.DataFrame:
+    df = team_plays.merge(games_split, on="gameId", how="inner")
+    if df.empty:
+        return pd.DataFrame()
+    df["success_flag"] = build_success_flag(df).astype(int)
+    out = (
+        df.groupby("split", dropna=False)
+        .agg(
+            Plays=("epa", "size"),
+            Games=("gameId", "nunique"),
+            **{
+                "EPA/play": ("epa", "mean"),
+                "Success Rate": ("success_flag", "mean"),
+                "Pass Rate": ("pass_play", "mean"),
+                "Run Rate": ("run_play", "mean"),
+            },
+        )
+        .reset_index()
+        .rename(columns={"split": "Status"})
+    )
+    out["Plays/Game"] = out["Plays"] / out["Games"].replace(0, np.nan)
+    return out[["Status", "Games", "Plays", "Plays/Game", "EPA/play", "Success Rate", "Pass Rate", "Run Rate"]]
+
+
+def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataFrame, player_id: str, position: str) -> pd.DataFrame:
+    df = team_plays.merge(games_split, on="gameId", how="inner")
+    if df.empty:
+        return pd.DataFrame()
+
+    pos = (position or "").upper()
+    df["target_id"] = df["target"]
+    df["receiver_id_norm"] = df["receiver_id"]
+    df["passer_id_norm"] = df["passer_id"]
+    df["runner_id_norm"] = df["runner_id"]
+    df["player_target"] = ((df["target_id"] == player_id) | ((df["target_id"] == "") & (df["receiver_id_norm"] == player_id))).astype(int)
+    df["player_rec_yards"] = np.where(df["receiver_id_norm"] == player_id, df["rec_yards"].fillna(0), 0.0)
+    df["player_rec_td"] = np.where((df["receiver_id_norm"] == player_id) & (df["passing_touchdown"] == 1), 1, 0)
+    df["player_rush_att"] = np.where((df["runner_id_norm"] == player_id) & (df["rush_attempt"] == 1), 1, 0)
+    df["player_rush_yards"] = np.where(df["runner_id_norm"] == player_id, df["rushing_yards"].fillna(0), 0.0)
+    df["player_rush_td"] = np.where((df["runner_id_norm"] == player_id) & (df["rushing_touchdown"] == 1), 1, 0)
+    df["player_pass_att"] = np.where((df["passer_id_norm"] == player_id) & (df["attempt"] == 1), 1, 0)
+    df["player_pass_yards"] = np.where(df["passer_id_norm"] == player_id, df["passing_yards"].fillna(0), 0.0)
+    df["player_pass_td"] = np.where((df["passer_id_norm"] == player_id) & (df["passing_touchdown"] == 1), 1, 0)
+    df["player_dropback"] = np.where((df["passer_id_norm"] == player_id) & (df["dropback"] == 1), 1, 0)
+    df["player_sack"] = np.where((df["passer_id_norm"] == player_id) & (df["sack"] == 1), 1, 0)
+    df["player_scramble"] = np.where((df["passer_id_norm"] == player_id) & (df["scramble"] == 1), 1, 0)
+    df["team_targets"] = (df["attempt"] == 1).astype(int)
+    df["team_rec_yards"] = df["rec_yards"].fillna(0)
+    df["team_rush_att"] = (df["rush_attempt"] == 1).astype(int)
+    df["team_rush_td"] = (df["rushing_touchdown"] == 1).astype(int)
+    df["team_rec_td"] = (df["passing_touchdown"] == 1).astype(int)
+
+    rows = []
+    for split_val, g in df.groupby("split", dropna=False):
+        games = int(g["gameId"].nunique())
+        targets = float(g["player_target"].sum())
+        rec_yards = float(g["player_rec_yards"].sum())
+        rec_tds = float(g["player_rec_td"].sum())
+        rush_att = float(g["player_rush_att"].sum())
+        rush_yards = float(g["player_rush_yards"].sum())
+        rush_tds = float(g["player_rush_td"].sum())
+        pass_att = float(g["player_pass_att"].sum())
+        pass_yards = float(g["player_pass_yards"].sum())
+        pass_tds = float(g["player_pass_td"].sum())
+        dropbacks = float(g["player_dropback"].sum())
+        sacks = float(g["player_sack"].sum())
+        scrambles = float(g["player_scramble"].sum())
+        team_targets = float(g["team_targets"].sum())
+        team_rec_yards = float(g["team_rec_yards"].sum())
+        team_rush_att = float(g["team_rush_att"].sum())
+        team_rush_td = float(g["team_rush_td"].sum())
+        team_rec_td = float(g["team_rec_td"].sum())
+
+        base = {"Status": split_val, "Games": games}
+        if pos.startswith("QB"):
+            base.update(
+                {
+                    "Passing Yards/Game": safe_div_scalar(pass_yards, games),
+                    "Sack Rate": safe_div_scalar(sacks, dropbacks),
+                    "Scramble Rate": safe_div_scalar(scrambles, dropbacks),
+                    "Passing Yards/Target": safe_div_scalar(pass_yards, pass_att),
+                    "Passing TD/Target": safe_div_scalar(pass_tds, pass_att),
+                    "Rushing Yards/Game": safe_div_scalar(rush_yards, games),
+                    "Rushing Yards/Attempt": safe_div_scalar(rush_yards, rush_att),
+                }
+            )
+        elif pos.startswith("RB"):
+            base.update(
+                {
+                    "Avg Target Share": safe_div_scalar(targets, team_targets),
+                    "Targets/Game": safe_div_scalar(targets, games),
+                    "Yards/Target": safe_div_scalar(rec_yards, targets),
+                    "Receiving Yardage Share": safe_div_scalar(rec_yards, team_rec_yards),
+                    "Rushing Carries/Game": safe_div_scalar(rush_att, games),
+                    "Rushing Carry Share": safe_div_scalar(rush_att, team_rush_att),
+                    "Yards/Carry": safe_div_scalar(rush_yards, rush_att),
+                    "Rushing TD/Carry": safe_div_scalar(rush_tds, rush_att),
+                    "Rushing TD Share": safe_div_scalar(rush_tds, team_rush_td),
+                }
+            )
+        else:
+            base.update(
+                {
+                    "Avg Target Share": safe_div_scalar(targets, team_targets),
+                    "Targets/Game": safe_div_scalar(targets, games),
+                    "Yards/Target": safe_div_scalar(rec_yards, targets),
+                    "Receiving Yardage Share": safe_div_scalar(rec_yards, team_rec_yards),
+                    "Receiving TD/Game": safe_div_scalar(rec_tds, games),
+                    "Receiving TD Share": safe_div_scalar(rec_tds, team_rec_td),
+                }
+            )
+        rows.append(base)
+
+    return pd.DataFrame(rows)
+
+
 def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
@@ -821,16 +983,15 @@ st.title("NFL Player On/Off Splits")
 st.caption("Weeks 1-18 are regular season and 19-22 are playoffs. Excludes no-play, spikes, kneels, 2PT attempts, and special teams plays.")
 
 all_seasons = sorted([int(x) for x in plays["season"].dropna().unique()])
-selected_seasons = st.sidebar.multiselect("Seasons", all_seasons, default=all_seasons)
+selected_season = st.sidebar.selectbox("Season", all_seasons, index=len(all_seasons) - 1 if all_seasons else 0)
 
 base_filtered = plays
 part_filtered = part_wide
 roster_filtered = rosters
 
-if selected_seasons:
-    base_filtered = base_filtered[base_filtered["season"].isin(selected_seasons)]
-    part_filtered = part_filtered[part_filtered["season"].isin(selected_seasons)]
-    roster_filtered = roster_filtered[roster_filtered["season"].isin(selected_seasons)]
+base_filtered = base_filtered[base_filtered["season"] == selected_season]
+part_filtered = part_filtered[part_filtered["season"] == selected_season]
+roster_filtered = roster_filtered[roster_filtered["season"] == selected_season]
 
 week_options = sorted([int(x) for x in base_filtered["display_week"].dropna().unique()])
 selected_weeks = st.sidebar.multiselect("Weeks", week_options, default=week_options)
@@ -947,7 +1108,7 @@ selection_payload = {
     "team": team,
     "players": selected_labels,
     "on_definition": on_mode,
-    "seasons": selected_seasons,
+    "season": selected_season,
     "weeks": selected_weeks,
     "down": selected_downs,
     "distance": distance_range,
@@ -1010,6 +1171,7 @@ top_defense = top_player_diffs(
 
 formatters = {
     "EPA/play": "{:.3f}",
+    "Plays/Game": "{:.1f}",
     "Success Rate": "{:.1%}",
     "Pass Rate": "{:.1%}",
     "Run Rate": "{:.1%}",
@@ -1025,6 +1187,24 @@ formatters = {
     "Off Pass Rate": "{:.1%}",
     "On Run Rate": "{:.1%}",
     "Off Run Rate": "{:.1%}",
+    "Passing Yards/Game": "{:.1f}",
+    "Sack Rate": "{:.1%}",
+    "Scramble Rate": "{:.1%}",
+    "Passing Yards/Target": "{:.2f}",
+    "Passing TD/Target": "{:.3f}",
+    "Rushing Yards/Game": "{:.1f}",
+    "Rushing Yards/Attempt": "{:.2f}",
+    "Avg Target Share": "{:.1%}",
+    "Targets/Game": "{:.2f}",
+    "Yards/Target": "{:.2f}",
+    "Receiving Yardage Share": "{:.1%}",
+    "Rushing Carries/Game": "{:.2f}",
+    "Rushing Carry Share": "{:.1%}",
+    "Yards/Carry": "{:.2f}",
+    "Rushing TD/Carry": "{:.3f}",
+    "Rushing TD Share": "{:.1%}",
+    "Receiving TD/Game": "{:.2f}",
+    "Receiving TD Share": "{:.1%}",
 }
 
 col1, col2 = st.columns(2)
@@ -1109,7 +1289,7 @@ with export_col2:
         f"Team: {selection_payload['team']}\n"
         f"Players: {', '.join(selection_payload['players'])}\n"
         f"On definition: {selection_payload['on_definition']}\n"
-        f"Seasons: {selection_payload['seasons']}\n"
+        f"Season: {selection_payload['season']}\n"
         f"Weeks: {selection_payload['weeks']}\n"
         f"Down: {selection_payload['down']}\n"
         f"Distance: {selection_payload['distance']}\n"
@@ -1151,4 +1331,77 @@ with export_col2:
 
 with st.expander("Selection", expanded=False):
     st.write(selection_payload)
+
+tab_onoff_hint, tab_status = st.tabs(["On/Off View", "Active/Inactive Splits"])
+with tab_onoff_hint:
+    st.info("Use the sections above for standard on/off analysis.")
+
+with tab_status:
+    st.markdown("### Active/Inactive Team + Player Splits")
+    status_team_options = sorted([str(x) for x in roster_filtered["team"].dropna().astype(str).unique() if str(x)])
+    if not status_team_options:
+        st.info("No teams available for current season/week filters.")
+    else:
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            status_team = st.selectbox("Status Split Team", status_team_options, key="status_team")
+
+        status_roster = roster_filtered[roster_filtered["team"] == status_team].copy()
+        pref_first = normalize_str(status_roster["FootballName"])
+        fb_first = normalize_str(status_roster["FirstName"])
+        ln = normalize_str(status_roster["LastName"])
+        fn = pref_first.where(pref_first.str.len() > 0, fb_first)
+        fulln = (fn + " " + ln).str.strip().where((fn + " " + ln).str.strip().str.len() > 0, fn)
+        status_roster["display_name"] = fulln
+        status_roster["label"] = (
+            status_roster["display_name"].fillna("Unknown")
+            + " ("
+            + status_roster["player_id"].astype(str)
+            + ") - "
+            + normalize_position(status_roster["position"]).astype(str)
+        )
+        status_roster = status_roster.dropna(subset=["player_id"]).drop_duplicates(subset=["player_id"]).reset_index(drop=True)
+
+        if status_roster.empty:
+            st.info("No roster rows available for this team and filter.")
+        else:
+            with col_b:
+                split_player_label = st.selectbox(
+                    "Player For Status Split",
+                    status_roster["label"].tolist(),
+                    key="status_split_player",
+                )
+            split_player_row = status_roster[status_roster["label"] == split_player_label].iloc[0]
+            split_player_id = str(split_player_row["player_id"])
+
+            with col_c:
+                second_player_label = st.selectbox(
+                    "Second Player For Player Stats",
+                    status_roster["label"].tolist(),
+                    key="status_second_player",
+                )
+            second_player_row = status_roster[status_roster["label"] == second_player_label].iloc[0]
+            second_player_id = str(second_player_row["player_id"])
+            second_player_pos = str(normalize_position(pd.Series([second_player_row["position"]])).iloc[0])
+
+            status_team_plays = leaderboard_plays[leaderboard_plays["offense"] == status_team].copy()
+            if status_team_plays.empty:
+                st.info("No team offensive plays for selected season/week.")
+            else:
+                games_split = game_status_split(status_team_plays, roster_filtered, status_team, split_player_id)
+                team_status_table = team_active_inactive_table(status_team_plays, games_split)
+                player_status_table = player_active_inactive_table(status_team_plays, games_split, second_player_id, second_player_pos)
+
+                st.markdown("#### Team Results (Split By Selected Player Status)")
+                if team_status_table.empty:
+                    st.info("No team status split rows.")
+                else:
+                    st.dataframe(team_status_table.style.format(formatters), width="stretch")
+
+                st.markdown("#### Player Results (Second Player)")
+                st.caption(f"Second player position profile: {second_player_pos}")
+                if player_status_table.empty:
+                    st.info("No player status split rows.")
+                else:
+                    st.dataframe(player_status_table.style.format(formatters), width="stretch")
 
