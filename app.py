@@ -762,12 +762,15 @@ def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataF
 
     pos = (position or "").upper()
     df["target_id"] = df["target"]
+    df["target_num"] = pd.to_numeric(df["target_id"], errors="coerce")
+    # In this dataset, target is commonly a numeric flag (e.g., 1.0) rather than player ID.
+    df["is_target_event"] = ((df["target_num"] == 1) | (df["target_id"] != "")).astype(int)
     df["receiver_id_norm"] = df["receiver_id"]
     df["passer_id_norm"] = df["passer_id"]
     df["runner_id_norm"] = df["runner_id"]
-    # Primary target signal comes from target column; fallback to receiver_id when target is blank.
+    # Player target: receiver-based match, with target-id fallback for datasets where target stores player IDs.
     df["player_target"] = (
-        (df["target_id"] == player_id) | ((df["target_id"] == "") & (df["receiver_id_norm"] == player_id))
+        ((df["receiver_id_norm"] == player_id) | (df["target_id"] == player_id)) & (df["is_target_event"] == 1)
     ).astype(int)
     df["player_rec_yards"] = np.where(df["receiver_id_norm"] == player_id, df["rec_yards"].fillna(0), 0.0)
     df["player_rec_td"] = np.where((df["receiver_id_norm"] == player_id) & (df["passing_touchdown"] == 1), 1, 0)
@@ -785,7 +788,7 @@ def player_active_inactive_table(team_plays: pd.DataFrame, games_split: pd.DataF
     df["player_dropback"] = np.where((df["passer_id_norm"] == player_id) & (df["dropback"] == 1), 1, 0)
     df["player_sack"] = np.where((df["passer_id_norm"] == player_id) & (df["sack"] == 1), 1, 0)
     df["player_scramble"] = np.where((df["passer_id_norm"] == player_id) & (df["scramble"] == 1), 1, 0)
-    df["team_targets"] = (df["target_id"] != "").astype(int)
+    df["team_targets"] = df["is_target_event"]
     df["team_rec_yards"] = df["rec_yards"].fillna(0)
     df["team_rush_att"] = (df["rush_attempt"] == 1).astype(int)
     df["team_designed_rush_att"] = ((df["rush_attempt"] == 1) & (df["scramble"] != 1)).astype(int)
