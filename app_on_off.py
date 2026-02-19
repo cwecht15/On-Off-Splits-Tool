@@ -10,6 +10,7 @@ This module powers the core workflow:
 import io
 import os
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -111,6 +112,16 @@ def ensure_data_file(filename: str) -> Path:
 
     cached_path.write_bytes(payload)
     return cached_path
+
+
+def get_data_last_updated_utc() -> str:
+    """Return latest CSV modified time (UTC) across required data files."""
+    try:
+        paths = [ensure_data_file(f) for f in REQUIRED_DATA_FILES]
+        latest_ts = max(p.stat().st_mtime for p in paths)
+        return datetime.fromtimestamp(latest_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    except Exception:
+        return "Unknown"
 
 
 @st.cache_data(show_spinner=False)
@@ -703,6 +714,7 @@ plays, part_wide, rosters = load_data()
 
 st.title("NFL Player On/Off Splits")
 st.caption("Weeks 1-18 are regular season and 19-22 are playoffs. Excludes no-play, spikes, kneels, 2PT attempts, and special teams plays.")
+st.caption(f"Data last updated: {get_data_last_updated_utc()}")
 
 # Global time filters are applied before team/player filters.
 all_seasons = sorted([int(x) for x in plays["season"].dropna().unique()])
