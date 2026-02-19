@@ -326,11 +326,17 @@ def ensure_data_file(filename: str) -> Path:
 
 
 def get_data_last_updated_utc() -> str:
-    """Return latest CSV modified time (UTC) across required data files."""
+    """Return latest CSV modified time in US Eastern time."""
     try:
         paths = [ensure_data_file(f) for f in REQUIRED_DATA_FILES]
         latest_ts = max(p.stat().st_mtime for p in paths)
-        return datetime.fromtimestamp(latest_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        try:
+            from zoneinfo import ZoneInfo
+
+            eastern = datetime.fromtimestamp(latest_ts, tz=timezone.utc).astimezone(ZoneInfo("America/New_York"))
+        except Exception:
+            eastern = datetime.fromtimestamp(latest_ts, tz=timezone.utc)
+        return eastern.strftime("%Y-%m-%d %H:%M:%S ET")
     except Exception:
         return "Unknown"
 
